@@ -20,6 +20,7 @@ interface IssuesTableProps {
   trashDeleteIds?: string[]
   onToggleTrashDelete?: (issueId: string) => void
   toFilePreviewSrc?: (path: string) => string
+  onPreviewClick?: (issue: AuditIssue) => void
 }
 
 function basename(path?: string) {
@@ -43,6 +44,7 @@ function IssuesTable({
   trashDeleteIds = [],
   onToggleTrashDelete,
   toFilePreviewSrc,
+  onPreviewClick,
 }: IssuesTableProps) {
   const selectedSet = new Set(selectedIssueIds)
   const trashDeleteSet = new Set(trashDeleteIds)
@@ -110,7 +112,13 @@ function IssuesTable({
                             src={toFilePreviewSrc(issue.thumbnailPaths.tiny)}
                             alt=""
                             loading="lazy"
-                            style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4, display: 'block' }}
+                            style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4, display: 'block', cursor: onPreviewClick ? 'pointer' : undefined }}
+                            onClick={(e) => {
+                              if (onPreviewClick) {
+                                e.stopPropagation()
+                                onPreviewClick(issue)
+                              }
+                            }}
                             onError={(e) => { ;(e.currentTarget as HTMLImageElement).style.display = 'none' }}
                           />
                         ) : (
