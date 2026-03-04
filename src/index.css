@@ -584,3 +584,82 @@ body {
 .sidebar-search:focus {
   border-color: var(--primary-color);
 }
+/* ─── Title Bar ─── */
+.title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 38px;
+  padding: 0 4px 0 12px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border-color);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.title-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.title-bar-brand {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--primary-color);
+}
+
+.title-bar-nav {
+  display: flex;
+  gap: 2px;
+}
+
+.title-bar-tab {
+  background: transparent;
+  border: none;
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.title-bar-tab:hover {
+  background: var(--bg-color);
+  color: var(--text-main);
+}
+
+.title-bar-tab.active {
+  background: var(--bg-color);
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.title-bar-controls {
+  display: flex;
+}
+
+.title-bar-btn {
+  width: 46px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: background 0.1s;
+}
+
+.title-bar-btn:hover {
+  background: var(--border-color);
+  color: var(--text-main);
+}
+
+.title-bar-close:hover {
+  background: var(--danger-color);
+  color: #fff;
+}
