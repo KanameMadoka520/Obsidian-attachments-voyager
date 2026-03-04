@@ -53,9 +53,13 @@ function Toolbar({
 
         <div className="toolbar-sep" />
 
-        <label className="toolbar-check">
+        <label
+          className="toolbar-check"
+          title="勾选后扫描时会生成三级缩略图缓存（64px / 256px / 1024px），用于画廊展示和预览弹窗。生成缩略图会降低扫描速度，但后续浏览性能更好。取消勾选则跳过生成，画廊使用原图或不显示图片。"
+        >
           <input type="checkbox" checked={generateThumbs} onChange={(e) => onGenerateThumbsChange(e.target.checked)} disabled={scanning || fixing} />
           <span>缩略图</span>
+          <span className="toolbar-hint">?</span>
         </label>
 
         {hasResult && (
