@@ -9,12 +9,13 @@ const MIN_CARD_WIDTH = 170
 interface VirtualGalleryProps {
   issues: AuditIssue[]
   displayMode: GalleryDisplayMode
-  selectedIssueIds: string[]
+  selectedIssueIds: Set<string>
   issueIndexMap: Map<string, number>
   toFilePreviewSrc: (path: string) => string
   getThumbSrc: (issue: AuditIssue, size: 'tiny' | 'small' | 'medium') => string
   onIssueClick: (issueId: string, index: number, event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => void
   onPreviewClick: (issue: AuditIssue) => void
+  onContextMenu?: (issue: AuditIssue, x: number, y: number) => void
 }
 
 function VirtualGallery({
@@ -26,6 +27,7 @@ function VirtualGallery({
   getThumbSrc,
   onIssueClick,
   onPreviewClick,
+  onContextMenu,
 }: VirtualGalleryProps) {
   const parentRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(800)
@@ -98,12 +100,13 @@ function VirtualGallery({
                   key={issue.id}
                   issue={issue}
                   displayMode={displayMode}
-                  checked={selectedIssueIds.includes(issue.id)}
+                  checked={selectedIssueIds.has(issue.id)}
                   issueIndex={issueIndexMap.get(issue.id) ?? (startIndex + colIdx)}
                   toFilePreviewSrc={toFilePreviewSrc}
                   getThumbSrc={getThumbSrc}
                   onCardClick={onIssueClick}
                   onPreviewClick={onPreviewClick}
+                  onContextMenu={onContextMenu}
                 />
               ))}
             </div>

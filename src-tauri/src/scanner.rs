@@ -2,27 +2,55 @@ use crate::models::{ScanIssue, ScanResult};
 use crate::parser::extract_image_refs;
 use crate::thumb_cache;
 use anyhow::Result;
+use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::UNIX_EPOCH;
 
-pub fn scan_vault_with_thumbs(root: &Path, generate_thumbs: bool, _thumb_size: u32) -> Result<ScanResult> {
-    let mut result = scan_vault(root)?;
+/// Progress callback: (phase, current, total)
+/// phase: "collecting" | "parsing" | "thumbnails"
+pub type ProgressFn = Box<dyn Fn(&str, usize, usize) + Send + Sync>;
+
+pub fn scan_vault_with_thumbs(
+    root: &Path,
+    generate_thumbs: bool,
+    _thumb_size: u32,
+    progress: Option<&ProgressFn>,
+) -> Result<ScanResult> {
+    let mut result = scan_vault(root, progress)?;
 
     if !generate_thumbs {
         return Ok(result);
     }
 
-    let mut by_image_path: HashMap<String, Option<thumb_cache::MultiThumbnailResult>> = HashMap::new();
+    let unique_paths: Vec<String> = {
+        let mut seen = std::collections::HashSet::new();
+        result.issues.iter()
+            .filter(|i| seen.insert(i.image_path.clone()))
+            .map(|i| i.image_path.clone())
+            .collect()
+    };
 
-    for issue in result.issues.iter() {
-        if by_image_path.contains_key(&issue.image_path) {
-            continue;
-        }
+    let total = unique_paths.len();
+    let done = AtomicUsize::new(0);
 
-        let multi = thumb_cache::generate_thumbnail_multi(&issue.image_path, thumb_cache::SIZES).ok();
-        by_image_path.insert(issue.image_path.clone(), multi);
-    }
+    let results: Vec<(String, Option<thumb_cache::MultiThumbnailResult>)> = unique_paths
+        .par_iter()
+        .map(|path| {
+            let multi = thumb_cache::generate_thumbnail_multi(path, thumb_cache::SIZES).ok();
+            let completed = done.fetch_add(1, Ordering::Relaxed) + 1;
+            if let Some(cb) = &progress {
+                if completed % 50 == 0 || completed == total {
+                    cb("thumbnails", completed, total);
+                }
+            }
+            (path.clone(), multi)
+        })
+        .collect();
+
+    let by_image_path: HashMap<String, Option<thumb_cache::MultiThumbnailResult>> = results.into_iter().collect();
 
     for issue in result.issues.iter_mut() {
         if let Some(Some(multi)) = by_image_path.get(&issue.image_path) {
@@ -34,19 +62,29 @@ pub fn scan_vault_with_thumbs(root: &Path, generate_thumbs: bool, _thumb_size: u
     Ok(result)
 }
 
-pub fn scan_vault(root: &Path) -> Result<ScanResult> {
+pub fn scan_vault(root: &Path, progress: Option<&ProgressFn>) -> Result<ScanResult> {
     let mut md_files = Vec::new();
     let mut image_files = Vec::new();
     collect_files(root, &mut md_files, &mut image_files)?;
 
+    if let Some(cb) = &progress {
+        cb("collecting", md_files.len(), image_files.len());
+    }
+
     let mut referenced_filenames = HashSet::new();
     let mut references: Vec<(PathBuf, String)> = Vec::new();
 
-    for md in &md_files {
+    let md_total = md_files.len();
+    for (i, md) in md_files.iter().enumerate() {
         let content = fs::read_to_string(md)?;
         for name in extract_image_refs(&content) {
             referenced_filenames.insert(name.clone());
             references.push((md.clone(), name));
+        }
+        if let Some(cb) = &progress {
+            if (i + 1) % 100 == 0 || i + 1 == md_total {
+                cb("parsing", i + 1, md_total);
+            }
         }
     }
 
@@ -74,6 +112,9 @@ pub fn scan_vault(root: &Path) -> Result<ScanResult> {
                     suggested_target: None,
                     thumbnail_path: None,
                     thumbnail_paths: None,
+                    file_size: fs::metadata(img).map(|m| m.len()).ok(),
+                    file_mtime: fs::metadata(img).and_then(|m| m.modified()).ok()
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs()),
                 });
             }
         }
@@ -102,6 +143,9 @@ pub fn scan_vault(root: &Path) -> Result<ScanResult> {
                         suggested_target: Some(expected.to_string_lossy().to_string()),
                         thumbnail_path: None,
                         thumbnail_paths: None,
+                        file_size: fs::metadata(found).map(|m| m.len()).ok(),
+                        file_mtime: fs::metadata(found).and_then(|m| m.modified()).ok()
+                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs()),
                     });
                 }
             }
@@ -186,7 +230,7 @@ mod tests {
         fs::write(wrong_dir.join("x.png"), b"x").unwrap();
         fs::write(right_dir.join("orphan.png"), b"o").unwrap();
 
-        let result = scan_vault(&root).unwrap();
+        let result = scan_vault(&root, None).unwrap();
 
         assert!(result.issues.iter().any(|i| i.r#type == "misplaced"));
         assert!(result.issues.iter().any(|i| i.r#type == "orphan"));

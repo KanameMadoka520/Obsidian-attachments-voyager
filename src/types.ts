@@ -9,6 +9,8 @@ export interface AuditIssue {
   suggestedTarget?: string
   thumbnailPath?: string
   thumbnailPaths?: { tiny?: string; small?: string; medium?: string }
+  fileSize?: number
+  fileMtime?: number
 }
 
 export interface ScanResult {
@@ -18,6 +20,10 @@ export interface ScanResult {
 }
 
 export type GalleryDisplayMode = 'thumbnail' | 'rawImage' | 'noImage'
+
+export type SizeFilter = 'all' | 'small' | 'medium' | 'large'
+
+export type ThemeMode = 'auto' | 'light' | 'dark' | 'parchment'
 
 export type ConflictPolicy = 'promptEach' | 'overwriteAll' | 'renameAll'
 

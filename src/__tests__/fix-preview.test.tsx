@@ -9,6 +9,15 @@ vi.mock('@tauri-apps/api/tauri', () => ({
   convertFileSrc: (p: string) => `tauri-file://${p}`,
 }))
 
+vi.mock('@tauri-apps/api/dialog', () => ({
+  open: vi.fn(),
+  save: vi.fn(),
+}))
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
+}))
+
 vi.mock('@tauri-apps/api/window', () => ({
   appWindow: {
     isMaximized: () => Promise.resolve(false),
@@ -56,6 +65,6 @@ test('requires confirmation before execute', async () => {
 
   expect(await screen.findByAltText('/x.png')).toBeInTheDocument()
   expect(screen.queryByText('确认执行修复')).not.toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: /修复/ }))
+  fireEvent.click(screen.getByRole('button', { name: /^修复/ }))
   expect(screen.getByText('确认执行修复')).toBeInTheDocument()
 })

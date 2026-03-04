@@ -44,7 +44,7 @@ fn cache_dir_for_size(label: &str) -> PathBuf {
 fn hashed_name(path: &str) -> String {
     let mut hasher = DefaultHasher::new();
     path.hash(&mut hasher);
-    format!("{:x}.png", hasher.finish())
+    format!("{:x}.webp", hasher.finish())
 }
 
 pub fn cache_root_path_string() -> String {
@@ -107,7 +107,7 @@ pub fn generate_thumbnail(original_path: &str, max_edge: u32) -> Result<Thumbnai
 
     let img = image::open(original)?;
     let thumb = img.resize(max_edge, max_edge, FilterType::Triangle);
-    thumb.save_with_format(&thumb_path, ImageFormat::Png)?;
+    thumb.save_with_format(&thumb_path, ImageFormat::WebP)?;
 
     Ok(ThumbnailResult {
         original_path: original_path.to_string(),
@@ -161,7 +161,7 @@ pub fn generate_thumbnail_multi(original_path: &str, sizes: &[(&str, u32)]) -> R
 
         fs::create_dir_all(&dir)?;
         let thumb = img.resize(*max_edge, *max_edge, FilterType::Triangle);
-        thumb.save_with_format(&thumb_path, ImageFormat::Png)?;
+        thumb.save_with_format(&thumb_path, ImageFormat::WebP)?;
         paths.insert(label.to_string(), thumb_path.to_string_lossy().to_string());
         generated_count += 1;
     }
