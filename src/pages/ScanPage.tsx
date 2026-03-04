@@ -300,7 +300,7 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
               disabled={loading || fixing}
               onChange={(e) => setGenerateThumbs(e.target.checked)}
             />
-            生成画廊缩略图（256px，会降低扫描速度）
+            生成画廊缩略图（64 / 256 / 1024px 三级缩略图，会降低扫描速度）
           </label>
 
           <label htmlFor="vault-path" className="input-label">仓库路径</label>
@@ -443,6 +443,7 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                   indexOfIssue={(id) => issueIndexMap.get(id) ?? -1}
                   trashDeleteIds={trashDeleteIds}
                   onToggleTrashDelete={toggleTrashDelete}
+                  toFilePreviewSrc={generateThumbs ? toFilePreviewSrc : undefined}
                 />
               ) : (
                 <IssuesTable
@@ -458,6 +459,7 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                   indexOfIssue={(id) => issueIndexMap.get(id) ?? -1}
                   trashDeleteIds={trashDeleteIds}
                   onToggleTrashDelete={toggleTrashDelete}
+                  toFilePreviewSrc={generateThumbs ? toFilePreviewSrc : undefined}
                 />
               )}
             </section>
@@ -465,88 +467,135 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
         </>
       )}
 
-      {galleryActionIssue && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.5)',
-            display: 'grid',
-            placeItems: 'center',
-            zIndex: 1000,
-          }}
-          onClick={() => setGalleryActionIssue(null)}
-        >
+      {galleryActionIssue && (() => {
+        const currentList = galleryTab === 'orphan' ? orphanIssues : misplacedIssues
+        const currentIdx = currentList.findIndex((i) => i.id === galleryActionIssue.id)
+        const hasPrev = currentIdx > 0
+        const hasNext = currentIdx < currentList.length - 1
+        const goPrev = () => { if (hasPrev) setGalleryActionIssue(currentList[currentIdx - 1]) }
+        const goNext = () => { if (hasNext) setGalleryActionIssue(currentList[currentIdx + 1]) }
+
+        return (
           <div
             style={{
-              background: 'var(--panel-bg, #fff)',
-              borderRadius: 12,
-              padding: 24,
-              minWidth: 320,
-              maxWidth: '90vw',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,0.5)',
+              display: 'grid',
+              placeItems: 'center',
+              zIndex: 1000,
             }}
-            onClick={(e) => e.stopPropagation()}
+            onClick={() => setGalleryActionIssue(null)}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowLeft') goPrev()
+              else if (e.key === 'ArrowRight') goNext()
+              else if (e.key === 'Escape') setGalleryActionIssue(null)
+            }}
+            tabIndex={0}
+            ref={(el) => el?.focus()}
           >
-            <div style={{ marginBottom: 16, textAlign: 'center' }}>
-              <div style={{ position: 'relative', width: '100%', maxHeight: 300, borderRadius: 8, overflow: 'hidden', background: '#1111', marginBottom: 12 }}>
-                {displayMode === 'thumbnail' && (galleryActionIssue.thumbnailPaths || galleryActionIssue.thumbnailPath) ? (
-                  <img
-                    src={getThumbSrc(galleryActionIssue, 'medium') || getThumbSrc(galleryActionIssue, 'small')}
-                    alt={galleryActionIssue.imagePath}
-                    style={{ width: '100%', maxHeight: 300, objectFit: 'contain' }}
-                  />
-                ) : (
-                  <img
-                    src={toFilePreviewSrc(galleryActionIssue.imagePath)}
-                    alt={galleryActionIssue.imagePath}
-                    style={{ width: '100%', maxHeight: 300, objectFit: 'contain' }}
-                    onError={(e) => {
-                      ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-                      const fallback = document.createElement('div')
-                      fallback.textContent = '无法加载图片'
-                      fallback.style.cssText = 'padding:24px;color:var(--text-muted);text-align:center'
-                      ;(e.currentTarget as HTMLImageElement).parentElement?.appendChild(fallback)
-                    }}
-                  />
-                )}
-              </div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
-                {galleryActionIssue.imagePath}
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+            {hasPrev && (
               <button
                 type="button"
-                className="btn btn-primary"
-                onClick={() => {
-                  void handleOpenFile(galleryActionIssue.imagePath)
-                  setGalleryActionIssue(null)
+                onClick={(e) => { e.stopPropagation(); goPrev() }}
+                style={{
+                  position: 'fixed', left: 16, top: '50%', transform: 'translateY(-50%)',
+                  background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', borderRadius: '50%',
+                  width: 44, height: 44, fontSize: 22, cursor: 'pointer', zIndex: 1001, display: 'grid', placeItems: 'center',
                 }}
+                aria-label="上一张"
               >
-                打开文件
+                ‹
               </button>
+            )}
+            {hasNext && (
               <button
                 type="button"
-                className="btn btn-secondary"
-                onClick={() => {
-                  void handleOpenFolder(galleryActionIssue.imagePath)
-                  setGalleryActionIssue(null)
+                onClick={(e) => { e.stopPropagation(); goNext() }}
+                style={{
+                  position: 'fixed', right: 16, top: '50%', transform: 'translateY(-50%)',
+                  background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', borderRadius: '50%',
+                  width: 44, height: 44, fontSize: 22, cursor: 'pointer', zIndex: 1001, display: 'grid', placeItems: 'center',
                 }}
+                aria-label="下一张"
               >
-                打开目录
+                ›
               </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setGalleryActionIssue(null)}
-              >
-                取消
-              </button>
+            )}
+            <div
+              style={{
+                background: 'var(--panel-bg, #fff)',
+                borderRadius: 12,
+                padding: 24,
+                minWidth: 320,
+                maxWidth: '90vw',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ marginBottom: 8, textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                {currentIdx + 1} / {currentList.length}
+              </div>
+              <div style={{ marginBottom: 16, textAlign: 'center' }}>
+                <div style={{ position: 'relative', width: '100%', maxHeight: 300, borderRadius: 8, overflow: 'hidden', background: '#1111', marginBottom: 12 }}>
+                  {displayMode === 'thumbnail' && (galleryActionIssue.thumbnailPaths || galleryActionIssue.thumbnailPath) ? (
+                    <img
+                      src={getThumbSrc(galleryActionIssue, 'medium') || getThumbSrc(galleryActionIssue, 'small')}
+                      alt={galleryActionIssue.imagePath}
+                      style={{ width: '100%', maxHeight: 300, objectFit: 'contain' }}
+                    />
+                  ) : (
+                    <img
+                      src={toFilePreviewSrc(galleryActionIssue.imagePath)}
+                      alt={galleryActionIssue.imagePath}
+                      style={{ width: '100%', maxHeight: 300, objectFit: 'contain' }}
+                      onError={(e) => {
+                        ;(e.currentTarget as HTMLImageElement).style.display = 'none'
+                        const fallback = document.createElement('div')
+                        fallback.textContent = '无法加载图片'
+                        fallback.style.cssText = 'padding:24px;color:var(--text-muted);text-align:center'
+                        ;(e.currentTarget as HTMLImageElement).parentElement?.appendChild(fallback)
+                      }}
+                    />
+                  )}
+                </div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
+                  {galleryActionIssue.imagePath}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => {
+                    void handleOpenFile(galleryActionIssue.imagePath)
+                    setGalleryActionIssue(null)
+                  }}
+                >
+                  打开文件
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    void handleOpenFolder(galleryActionIssue.imagePath)
+                    setGalleryActionIssue(null)
+                  }}
+                >
+                  打开目录
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setGalleryActionIssue(null)}
+                >
+                  取消
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       <WorkLogPanel logs={logs} />
       <OperationHistoryPanel tasks={tasks} onUndoTask={handleUndoTask} onUndoEntry={handleUndoEntry} />

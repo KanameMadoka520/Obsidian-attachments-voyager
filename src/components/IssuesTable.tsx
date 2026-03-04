@@ -19,6 +19,7 @@ interface IssuesTableProps {
   indexOfIssue?: (issueId: string) => number
   trashDeleteIds?: string[]
   onToggleTrashDelete?: (issueId: string) => void
+  toFilePreviewSrc?: (path: string) => string
 }
 
 function basename(path?: string) {
@@ -41,6 +42,7 @@ function IssuesTable({
   indexOfIssue,
   trashDeleteIds = [],
   onToggleTrashDelete,
+  toFilePreviewSrc,
 }: IssuesTableProps) {
   const selectedSet = new Set(selectedIssueIds)
   const trashDeleteSet = new Set(trashDeleteIds)
@@ -52,17 +54,18 @@ function IssuesTable({
         <table className="data-table">
           <thead>
             <tr>
-              <th style={{ width: '8%' }}>选择</th>
-              <th style={{ width: mode === 'orphan' ? '46%' : '26%' }}>图片路径</th>
-              {mode === 'misplaced' && <th style={{ width: '20%' }}>建议路径</th>}
-              {mode === 'misplaced' && <th style={{ width: '18%' }}>引用 Markdown</th>}
-              <th style={{ width: mode === 'orphan' ? '46%' : '36%' }}>操作</th>
+              <th style={{ width: '5%' }}>选择</th>
+              {toFilePreviewSrc && <th style={{ width: '60px' }}>预览</th>}
+              <th style={{ width: mode === 'orphan' ? '40%' : '22%' }}>图片路径</th>
+              {mode === 'misplaced' && <th style={{ width: '18%' }}>建议路径</th>}
+              {mode === 'misplaced' && <th style={{ width: '16%' }}>引用 Markdown</th>}
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
             {issues.length === 0 ? (
               <tr>
-                <td colSpan={mode === 'orphan' ? 3 : 5} className="empty-state">
+                <td colSpan={99} className="empty-state">
                   当前类型暂无问题
                 </td>
               </tr>
@@ -100,6 +103,23 @@ function IssuesTable({
                         }}
                       />
                     </td>
+                    {toFilePreviewSrc && (
+                      <td style={{ padding: 4 }}>
+                        {issue.thumbnailPaths?.tiny ? (
+                          <img
+                            src={toFilePreviewSrc(issue.thumbnailPaths.tiny)}
+                            alt=""
+                            loading="lazy"
+                            style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4, display: 'block' }}
+                            onError={(e) => { ;(e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                          />
+                        ) : (
+                          <div style={{ width: 48, height: 48, borderRadius: 4, background: '#1111', display: 'grid', placeItems: 'center', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                            无
+                          </div>
+                        )}
+                      </td>
+                    )}
                     <td style={{ wordBreak: 'break-all' }}>{issue.imagePath}</td>
                     {mode === 'misplaced' && (
                       <td style={{ wordBreak: 'break-all' }}>{issue.suggestedTarget ?? '-'}</td>
