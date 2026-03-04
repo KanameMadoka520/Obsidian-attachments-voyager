@@ -1,15 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { open } from '@tauri-apps/api/dialog'
+import { open, save } from '@tauri-apps/api/dialog'
 import { invoke, convertFileSrc } from '@tauri-apps/api/tauri'
+import { listen } from '@tauri-apps/api/event'
 import { appWindow } from '@tauri-apps/api/window'
 import ConfirmDialog from '../components/ConfirmDialog'
+import ContextMenu from '../components/ContextMenu'
+import type { MenuItem } from '../components/ContextMenu'
 import DetailPanel from '../components/DetailPanel'
+import ProgressBar from '../components/ProgressBar'
 import Sidebar from '../components/Sidebar'
 import StatusBar from '../components/StatusBar'
 import Toolbar from '../components/Toolbar'
 import VirtualGallery from '../components/VirtualGallery'
-import type { AuditIssue, ConflictPolicy, GalleryDisplayMode, OperationTask, RuntimeLogLine, ScanResult } from '../types'
+import { FILE_TYPE_GROUPS } from '../components/Sidebar'
+import type { AuditIssue, ConflictPolicy, GalleryDisplayMode, OperationTask, RuntimeLogLine, ScanResult, SizeFilter } from '../types'
 import { scanVault } from '../lib/commands'
+import * as exportUtil from '../lib/export'
+import * as storage from '../lib/storage'
+
+interface ScanProgress {
+  phase: 'collecting' | 'parsing' | 'thumbnails'
+  current: number
+  total: number
+}
 
 interface FixSummary {
   taskId: string
@@ -24,22 +37,23 @@ interface UndoSummary {
 
 interface ScanPageProps {
   conflictPolicy: ConflictPolicy
+  onScanComplete?: (result: ScanResult) => void
 }
 
 const RECENT_VAULTS_KEY = 'voyager-recent-vaults-v1'
 const DISPLAY_MODE_KEY = 'voyager-display-mode-v1'
 const LAST_VAULT_KEY = 'voyager-last-vault-v1'
-const CACHED_RESULT_KEY = 'voyager-cached-scan-result-v1'
+const CACHED_RESULT_KEY = 'voyager-cached-scan-result-v3'
 
 function loadDisplayMode(): GalleryDisplayMode {
-  const raw = localStorage.getItem(DISPLAY_MODE_KEY)
+  const raw = storage.getItem(DISPLAY_MODE_KEY)
   if (raw === 'rawImage' || raw === 'noImage') return raw
   return 'thumbnail'
 }
 
 function loadRecentVaults(): string[] {
   try {
-    const raw = localStorage.getItem(RECENT_VAULTS_KEY)
+    const raw = storage.getItem(RECENT_VAULTS_KEY)
     if (!raw) return []
     const arr = JSON.parse(raw)
     if (!Array.isArray(arr)) return []
@@ -54,17 +68,17 @@ function saveRecentVault(path: string) {
   if (!normalized) return
   const current = loadRecentVaults()
   const next = [normalized, ...current.filter((p) => p !== normalized)].slice(0, 8)
-  localStorage.setItem(RECENT_VAULTS_KEY, JSON.stringify(next))
-  localStorage.setItem(LAST_VAULT_KEY, normalized)
+  storage.setItem(RECENT_VAULTS_KEY, JSON.stringify(next))
+  storage.setItem(LAST_VAULT_KEY, normalized)
 }
 
 function loadLastVault(): string {
-  return localStorage.getItem(LAST_VAULT_KEY) ?? ''
+  return storage.getItem(LAST_VAULT_KEY) ?? ''
 }
 
 function loadCachedResult(): ScanResult | undefined {
   try {
-    const raw = localStorage.getItem(CACHED_RESULT_KEY)
+    const raw = storage.getItem(CACHED_RESULT_KEY)
     if (!raw) return undefined
     return JSON.parse(raw) as ScanResult
   } catch {
@@ -74,9 +88,9 @@ function loadCachedResult(): ScanResult | undefined {
 
 function saveCachedResult(result: ScanResult | undefined) {
   if (!result) {
-    localStorage.removeItem(CACHED_RESULT_KEY)
+    storage.removeItem(CACHED_RESULT_KEY)
   } else {
-    localStorage.setItem(CACHED_RESULT_KEY, JSON.stringify(result))
+    storage.setItem(CACHED_RESULT_KEY, JSON.stringify(result))
   }
 }
 
@@ -95,26 +109,32 @@ function getThumbSrc(issue: AuditIssue, size: 'tiny' | 'small' | 'medium'): stri
   return path ? toFilePreviewSrc(path) : ''
 }
 
-function ScanPage({ conflictPolicy }: ScanPageProps) {
+function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
   const [vaultPath, setVaultPath] = useState(() => loadLastVault())
   const [recentVaults, setRecentVaults] = useState<string[]>(() => loadRecentVaults())
   const [result, setResult] = useState<ScanResult | undefined>(() => loadCachedResult())
   const [resultIsStale, setResultIsStale] = useState(() => loadCachedResult() !== undefined)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null)
   const [error, setError] = useState('')
   const [fixing, setFixing] = useState(false)
   const [logs, setLogs] = useState<RuntimeLogLine[]>([])
   const [tasks, setTasks] = useState<OperationTask[]>([])
-  const [selectedIssueIds, setSelectedIssueIds] = useState<string[]>([])
+  const [selectedIssueIds, setSelectedIssueIds] = useState<Set<string>>(new Set())
   const [anchorIndex, setAnchorIndex] = useState<number | null>(null)
   const [galleryTab, setGalleryTab] = useState<'orphan' | 'misplaced'>('orphan')
   const [searchText, setSearchText] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [fileTypeFilter, setFileTypeFilter] = useState<Set<string>>(() => new Set(FILE_TYPE_GROUPS.map((g) => g.key)))
+  const [sizeFilter, setSizeFilter] = useState<SizeFilter>('all')
   const [focusedIssue, setFocusedIssue] = useState<AuditIssue | null>(null)
   const [trashDeleteIds, setTrashDeleteIds] = useState<string[]>([])
   const [generateThumbs, setGenerateThumbs] = useState(true)
   const [displayMode, setDisplayMode] = useState<GalleryDisplayMode>(() => loadDisplayMode())
   const [galleryActionIssue, setGalleryActionIssue] = useState<AuditIssue | null>(null)
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; issue: AuditIssue } | null>(null)
   // null = fit-to-container, number = scale relative to image's natural pixel size (1 = 100% native)
   const [previewZoom, setPreviewZoom] = useState<number | null>(null)
   const [previewNaturalSize, setPreviewNaturalSize] = useState<{ w: number; h: number } | null>(null)
@@ -126,6 +146,12 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
     dragging: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0,
   })
   const fsWheelRef = useRef<HTMLDivElement>(null)
+
+  // Notify parent of cached result on mount
+  useEffect(() => {
+    if (result) onScanComplete?.(result)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const enterFullscreen = useCallback((issue: AuditIssue) => {
     setFullscreenIssue(issue)
@@ -211,13 +237,68 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
 
   const changeDisplayMode = (mode: GalleryDisplayMode) => {
     setDisplayMode(mode)
-    localStorage.setItem(DISPLAY_MODE_KEY, mode)
+    storage.setItem(DISPLAY_MODE_KEY, mode)
   }
 
+  // Debounce search text (300ms)
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    searchTimerRef.current = setTimeout(() => setDebouncedSearch(searchText), 300)
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current) }
+  }, [searchText])
+
   const allIssues = result?.issues ?? []
-  const issues = searchText
-    ? allIssues.filter((i) => i.imagePath.toLowerCase().includes(searchText.toLowerCase()))
-    : allIssues
+
+  // Build extension-to-group-key lookup
+  const extGroupMap = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const g of FILE_TYPE_GROUPS) {
+      for (const ext of g.extensions) map.set(ext, g.key)
+    }
+    return map
+  }, [])
+
+  const getExtGroupKey = useCallback((path: string) => {
+    const dot = path.lastIndexOf('.')
+    if (dot < 0) return 'other'
+    const ext = path.slice(dot + 1).toLowerCase()
+    return extGroupMap.get(ext) ?? 'other'
+  }, [extGroupMap])
+
+  // Compute type counts (before filtering by type/size, so counts stay stable)
+  const typeCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const issue of allIssues) {
+      const key = getExtGroupKey(issue.imagePath)
+      counts[key] = (counts[key] ?? 0) + 1
+    }
+    return counts
+  }, [allIssues, getExtGroupKey])
+
+  const matchesSize = useCallback((issue: AuditIssue) => {
+    if (sizeFilter === 'all') return true
+    const size = issue.fileSize
+    if (size == null) return true // no size info → show anyway
+    if (sizeFilter === 'small') return size < 102400
+    if (sizeFilter === 'medium') return size >= 102400 && size <= 1048576
+    return size > 1048576
+  }, [sizeFilter])
+
+  const issues = useMemo(() => {
+    let filtered = allIssues
+    if (debouncedSearch) {
+      const lower = debouncedSearch.toLowerCase()
+      filtered = filtered.filter((i) => i.imagePath.toLowerCase().includes(lower))
+    }
+    if (fileTypeFilter.size < FILE_TYPE_GROUPS.length) {
+      filtered = filtered.filter((i) => fileTypeFilter.has(getExtGroupKey(i.imagePath)))
+    }
+    if (sizeFilter !== 'all') {
+      filtered = filtered.filter(matchesSize)
+    }
+    return filtered
+  }, [allIssues, debouncedSearch, fileTypeFilter, sizeFilter, getExtGroupKey, matchesSize])
+
   const orphanIssues = issues.filter((i) => i.type === 'orphan')
   const misplacedIssues = issues.filter((i) => i.type === 'misplaced')
 
@@ -263,13 +344,19 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
 
     setLoading(true)
     setError('')
+    setScanProgress(null)
+
+    const unlisten = await listen<ScanProgress>('scan-progress', (event) => {
+      setScanProgress(event.payload)
+    })
 
     try {
       const scanResult = await scanVault(vaultPath, { generateThumbs, thumbSize: 256 })
       setResult(scanResult)
       saveCachedResult(scanResult)
       setResultIsStale(false)
-      setSelectedIssueIds([])
+      onScanComplete?.(scanResult)
+      setSelectedIssueIds(new Set())
       setAnchorIndex(null)
       setTrashDeleteIds([])
       saveRecentVault(vaultPath)
@@ -280,6 +367,8 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
       saveCachedResult(undefined)
       setError(e instanceof Error ? e.message : '扫描失败')
     } finally {
+      unlisten()
+      setScanProgress(null)
       setLoading(false)
     }
   }
@@ -292,30 +381,32 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
     const clicked = issues.find((i) => i.id === issueId) ?? null
     setFocusedIssue(clicked)
     setSelectedIssueIds((prev) => {
-      const hasIssue = prev.includes(issueId)
+      const hasIssue = prev.has(issueId)
 
       if (event.shiftKey && anchorIndex !== null && issues.length > 0) {
         const from = Math.min(anchorIndex, index)
         const to = Math.max(anchorIndex, index)
-        return issues.slice(from, to + 1).map((i) => i.id)
+        return new Set(issues.slice(from, to + 1).map((i) => i.id))
       }
 
       if (event.ctrlKey || event.metaKey) {
         setAnchorIndex(index)
-        return hasIssue ? prev.filter((id) => id !== issueId) : [...prev, issueId]
+        const next = new Set(prev)
+        if (hasIssue) next.delete(issueId); else next.add(issueId)
+        return next
       }
 
       setAnchorIndex(index)
-      return hasIssue ? prev.filter((id) => id !== issueId) : [issueId]
+      return hasIssue ? new Set<string>() : new Set([issueId])
     })
   }
 
   const selectAllIssues = () => {
-    setSelectedIssueIds(issues.map((i) => i.id))
+    setSelectedIssueIds(new Set(issues.map((i) => i.id)))
   }
 
   const clearSelectedIssues = () => {
-    setSelectedIssueIds([])
+    setSelectedIssueIds(new Set())
     setAnchorIndex(null)
   }
 
@@ -330,7 +421,7 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
     }
 
     const selectedIssues = issues
-      .filter((issue) => selectedIssueIds.includes(issue.id))
+      .filter((issue) => selectedIssueIds.has(issue.id))
       .map((issue) => {
         if (issue.type === 'misplaced' && issue.reason.includes('trash') && trashDeleteIds.includes(issue.id)) {
           return { ...issue, suggestedTarget: '__DELETE__' }
@@ -417,6 +508,48 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
     }
   }
 
+  const handleExport = async (format: 'json' | 'csv' | 'markdown') => {
+    const ext = { json: 'json', csv: 'csv', markdown: 'md' }[format]
+    const path = await save({
+      defaultPath: `voyager-report.${ext}`,
+      filters: [{ name: format.toUpperCase(), extensions: [ext] }],
+    })
+    if (!path) return
+    const content = format === 'json'
+      ? exportUtil.toJSON(issues)
+      : format === 'csv'
+        ? exportUtil.toCSV(issues)
+        : exportUtil.toMarkdown(issues)
+    try {
+      await invoke('write_text_file', { path, content })
+      setError(`导出完成：${path}`)
+    } catch (e) {
+      setError(`导出失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  const handleCardContextMenu = useCallback((issue: AuditIssue, x: number, y: number) => {
+    setCtxMenu({ x, y, issue })
+  }, [])
+
+  const ctxMenuItems: MenuItem[] = ctxMenu ? [
+    { label: '打开文件', onClick: () => handleOpenFile(ctxMenu.issue.imagePath) },
+    { label: '打开目录', onClick: () => handleOpenFolder(ctxMenu.issue.imagePath) },
+    { label: '复制路径', onClick: () => { void navigator.clipboard.writeText(ctxMenu.issue.imagePath) } },
+    { label: '全屏查看', onClick: () => enterFullscreen(ctxMenu.issue) },
+    {
+      label: selectedIssueIds.has(ctxMenu.issue.id) ? '取消选中' : '选中',
+      onClick: () => {
+        const id = ctxMenu.issue.id
+        setSelectedIssueIds((prev) => {
+          const next = new Set(prev)
+          if (next.has(id)) next.delete(id); else next.add(id)
+          return next
+        })
+      },
+    },
+  ] : []
+
   const currentGalleryIssues = galleryTab === 'orphan' ? orphanIssues : misplacedIssues
 
   return (
@@ -432,14 +565,17 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
         displayMode={displayMode}
         onDisplayModeChange={changeDisplayMode}
         hasResult={!!result}
-        selectedCount={selectedIssueIds.length}
+        selectedCount={selectedIssueIds.size}
         totalCount={issues.length}
         onSelectAll={selectAllIssues}
         onClearSelection={clearSelectedIssues}
         onFix={() => setConfirmOpen(true)}
+        onExport={handleExport}
         generateThumbs={generateThumbs}
         onGenerateThumbsChange={setGenerateThumbs}
       />
+
+      <ProgressBar progress={scanProgress} visible={loading} />
 
       {error && (
         <div style={{ padding: '4px 12px', fontSize: '0.78rem' }}>
@@ -448,7 +584,7 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
       )}
 
       {resultIsStale && result && (
-        <div style={{ padding: '4px 12px', fontSize: '0.78rem', background: 'rgba(255, 180, 0, 0.1)', color: 'var(--text-muted)', borderBottom: '1px solid rgba(255, 180, 0, 0.3)' }}>
+        <div style={{ padding: '4px 12px', fontSize: '0.78rem', background: 'var(--warning-bg)', color: 'var(--text-muted)', borderBottom: '1px solid var(--warning-border)' }}>
           当前展示的是上次的扫描结果。如果仓库内容已发生变化，建议重新扫描。
         </div>
       )}
@@ -461,6 +597,11 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
           misplacedCount={misplacedIssues.length}
           searchText={searchText}
           onSearchChange={setSearchText}
+          fileTypeFilter={fileTypeFilter}
+          onFileTypeFilterChange={setFileTypeFilter}
+          typeCounts={typeCounts}
+          sizeFilter={sizeFilter}
+          onSizeFilterChange={setSizeFilter}
         />
 
         <main className="scan-gallery">
@@ -473,12 +614,13 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
             getThumbSrc={getThumbSrc}
             onIssueClick={handleIssueRowClick}
             onPreviewClick={setGalleryActionIssue}
+            onContextMenu={handleCardContextMenu}
           />
         </main>
 
         <DetailPanel
           issue={focusedIssue}
-          selectedCount={selectedIssueIds.length}
+          selectedCount={selectedIssueIds.size}
           toFilePreviewSrc={toFilePreviewSrc}
           getThumbSrc={getThumbSrc}
           onOpenFile={handleOpenFile}
@@ -490,10 +632,14 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
       <StatusBar
         orphanCount={orphanIssues.length}
         misplacedCount={misplacedIssues.length}
-        selectedCount={selectedIssueIds.length}
+        selectedCount={selectedIssueIds.size}
         totalCount={issues.length}
         logs={logs}
         scanning={loading}
+        tasks={tasks}
+        onUndoTask={handleUndoTask}
+        onUndoEntry={handleUndoEntry}
+        onClearThumbnailCache={clearThumbnailCache}
       />
 
       {galleryActionIssue && (() => {
@@ -509,7 +655,7 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
             style={{
               position: 'fixed',
               inset: 0,
-              background: 'rgba(0,0,0,0.5)',
+              background: 'var(--overlay-bg)',
               display: 'grid',
               placeItems: 'center',
               zIndex: 1000,
@@ -529,7 +675,7 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                 onClick={(e) => { e.stopPropagation(); goPrev() }}
                 style={{
                   position: 'fixed', left: 16, top: '50%', transform: 'translateY(-50%)',
-                  background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', borderRadius: '50%',
+                  background: 'var(--overlay-bg)', color: '#fff', border: 'none', borderRadius: '50%',
                   width: 44, height: 44, fontSize: 22, cursor: 'pointer', zIndex: 1001, display: 'grid', placeItems: 'center',
                 }}
                 aria-label="上一张"
@@ -543,7 +689,7 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                 onClick={(e) => { e.stopPropagation(); goNext() }}
                 style={{
                   position: 'fixed', right: 16, top: '50%', transform: 'translateY(-50%)',
-                  background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', borderRadius: '50%',
+                  background: 'var(--overlay-bg)', color: '#fff', border: 'none', borderRadius: '50%',
                   width: 44, height: 44, fontSize: 22, cursor: 'pointer', zIndex: 1001, display: 'grid', placeItems: 'center',
                 }}
                 aria-label="下一张"
@@ -558,7 +704,7 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                 padding: 24,
                 minWidth: 320,
                 maxWidth: '90vw',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+                boxShadow: '0 8px 32px var(--shadow)',
               }}
               onClick={(e) => e.stopPropagation()}
             >
@@ -581,7 +727,7 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                     maxHeight: 400,
                     borderRadius: 8,
                     overflow: previewZoom !== null ? 'auto' : 'hidden',
-                    background: '#1111',
+                    background: 'var(--placeholder-bg)',
                     marginBottom: 12,
                     cursor: dragState.current.dragging
                       ? 'grabbing'
@@ -846,6 +992,15 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
           void runFixes()
         }}
       />
+
+      {ctxMenu && (
+        <ContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          items={ctxMenuItems}
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
     </div>
   )
 }

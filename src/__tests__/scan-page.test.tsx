@@ -14,6 +14,10 @@ vi.mock('@tauri-apps/api/tauri', () => ({
   convertFileSrc: (p: string) => `tauri-file://${p}`,
 }))
 
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
+}))
+
 vi.mock('@tauri-apps/api/window', () => ({
   appWindow: {
     isMaximized: () => Promise.resolve(false),
@@ -141,13 +145,13 @@ test('fix requires selecting issues and supports select all', async () => {
 
   await screen.findByText('全选')
 
-  fireEvent.click(screen.getByRole('button', { name: /修复/ }))
+  fireEvent.click(screen.getByRole('button', { name: /^修复/ }))
   fireEvent.click(screen.getByRole('button', { name: '确认执行' }))
 
   await screen.findByText('请先选择要修复的文件')
 
   fireEvent.click(screen.getByRole('button', { name: '全选' }))
-  fireEvent.click(screen.getByRole('button', { name: /修复/ }))
+  fireEvent.click(screen.getByRole('button', { name: /^修复/ }))
   fireEvent.click(screen.getByRole('button', { name: '确认执行' }))
 
   await waitFor(() => {

@@ -13,6 +13,8 @@ pub struct ScanIssue {
     pub suggested_target: Option<String>,
     pub thumbnail_path: Option<String>,
     pub thumbnail_paths: Option<HashMap<String, String>>,
+    pub file_size: Option<u64>,
+    pub file_mtime: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

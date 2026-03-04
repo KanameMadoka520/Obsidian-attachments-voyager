@@ -14,7 +14,8 @@
     "@tanstack/react-virtual": "^3.13.19",
     "@tauri-apps/api": "^1.6.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "recharts": "^3.7.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^1.6.3",

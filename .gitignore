@@ -1,5 +1,33 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
 src-tauri/target/
+tsconfig.tsbuildinfo
+
+# Thumbnail cache (runtime generated)
+.voyager-gallery-cache/
+
+# App data (runtime generated)
+voyager-data/
+
+# Logs
 *.log
+
+# OS files
 .DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Debug logs
+npminstall-debug.log
+
+# Compact handoff docs (session-specific, not project code)
+compact-*.md

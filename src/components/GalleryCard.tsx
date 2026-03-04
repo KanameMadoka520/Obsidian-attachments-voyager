@@ -10,6 +10,7 @@ interface GalleryCardProps {
   getThumbSrc: (issue: AuditIssue, size: 'tiny' | 'small' | 'medium') => string
   onCardClick: (issueId: string, index: number, event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => void
   onPreviewClick: (issue: AuditIssue) => void
+  onContextMenu?: (issue: AuditIssue, x: number, y: number) => void
 }
 
 const GalleryCard = memo(function GalleryCard({
@@ -21,6 +22,7 @@ const GalleryCard = memo(function GalleryCard({
   getThumbSrc,
   onCardClick,
   onPreviewClick,
+  onContextMenu,
 }: GalleryCardProps) {
   return (
     <label
@@ -40,6 +42,13 @@ const GalleryCard = memo(function GalleryCard({
           })
         }
       }}
+      onContextMenu={(e) => {
+        if (onContextMenu) {
+          e.preventDefault()
+          e.stopPropagation()
+          onContextMenu(issue, e.clientX, e.clientY)
+        }
+      }}
     >
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
         <input type="checkbox" readOnly checked={checked} />
@@ -51,7 +60,7 @@ const GalleryCard = memo(function GalleryCard({
           height: 120,
           borderRadius: 6,
           overflow: 'hidden',
-          background: '#1111',
+          background: 'var(--placeholder-bg)',
           cursor: displayMode === 'noImage' ? 'default' : 'zoom-in',
         }}
         onClick={(e) => {

@@ -85,7 +85,7 @@ fn undo_entry_impl(entry: &mut OperationEntry) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn scan_vault(root: String, generate_thumbs: Option<bool>, thumb_size: Option<u32>) -> Result<ScanResult, String> {
+fn scan_vault(window: tauri::Window, root: String, generate_thumbs: Option<bool>, thumb_size: Option<u32>) -> Result<ScanResult, String> {
     let generate_thumbs = generate_thumbs.unwrap_or(true);
     let thumb_size = thumb_size.unwrap_or(256);
 
@@ -96,7 +96,15 @@ fn scan_vault(root: String, generate_thumbs: Option<bool>, thumb_size: Option<u3
         ),
     );
 
-    scanner::scan_vault_with_thumbs(Path::new(&root), generate_thumbs, thumb_size).map_err(|e| e.to_string())
+    let progress: scanner::ProgressFn = Box::new(move |phase: &str, current: usize, total: usize| {
+        let _ = window.emit("scan-progress", serde_json::json!({
+            "phase": phase,
+            "current": current,
+            "total": total,
+        }));
+    });
+
+    scanner::scan_vault_with_thumbs(Path::new(&root), generate_thumbs, thumb_size, Some(&progress)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -460,6 +468,67 @@ fn clear_thumbnail_cache() -> Result<CacheClearSummary, String> {
     Ok(CacheClearSummary { removed, cache_dir: cache_dir })
 }
 
+fn get_storage_dir() -> std::path::PathBuf {
+    let exe = std::env::current_exe().unwrap_or_default();
+    let exe_dir = exe.parent().unwrap_or(Path::new("."));
+    exe_dir.join("voyager-data")
+}
+
+#[tauri::command]
+fn write_text_file(path: String, content: String) -> Result<(), String> {
+    fs::write(&path, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn read_local_storage(key: String) -> Result<Option<String>, String> {
+    let dir = get_storage_dir();
+    let file = dir.join(format!("{key}.json"));
+    if !file.exists() {
+        return Ok(None);
+    }
+    fs::read_to_string(&file).map(Some).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn write_local_storage(key: String, value: String) -> Result<(), String> {
+    let dir = get_storage_dir();
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let file = dir.join(format!("{key}.json"));
+    fs::write(&file, value).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_local_storage(key: String) -> Result<(), String> {
+    let dir = get_storage_dir();
+    let file = dir.join(format!("{key}.json"));
+    if file.exists() {
+        fs::remove_file(&file).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn read_all_local_storage() -> Result<std::collections::HashMap<String, String>, String> {
+    let dir = get_storage_dir();
+    let mut map = std::collections::HashMap::new();
+    if !dir.exists() {
+        return Ok(map);
+    }
+    let entries = fs::read_dir(&dir).map_err(|e| e.to_string())?;
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("json") {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    map.insert(stem.to_string(), content);
+                }
+            }
+        }
+    }
+    Ok(map)
+}
+
 fn main() {
     let startup_report = startup_diag::collect_startup_report();
     startup_diag::write_startup_report(&startup_report);
@@ -476,7 +545,12 @@ fn main() {
             undo_task,
             open_file,
             open_file_parent,
-            get_runtime_logs
+            get_runtime_logs,
+            read_local_storage,
+            write_local_storage,
+            remove_local_storage,
+            read_all_local_storage,
+            write_text_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

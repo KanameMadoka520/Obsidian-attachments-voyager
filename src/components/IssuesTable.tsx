@@ -86,7 +86,7 @@ function IssuesTable({
                         metaKey: e.metaKey,
                       })
                     }
-                    style={selected ? { backgroundColor: 'rgba(123, 97, 255, 0.08)' } : undefined}
+                    style={selected ? { backgroundColor: 'var(--selection-bg)' } : undefined}
                   >
                     <td>
                       <input
@@ -122,7 +122,7 @@ function IssuesTable({
                             onError={(e) => { ;(e.currentTarget as HTMLImageElement).style.display = 'none' }}
                           />
                         ) : (
-                          <div style={{ width: 48, height: 48, borderRadius: 4, background: '#1111', display: 'grid', placeItems: 'center', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                          <div style={{ width: 48, height: 48, borderRadius: 4, background: 'var(--placeholder-bg)', display: 'grid', placeItems: 'center', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
                             无
                           </div>
                         )}

@@ -1,121 +1,306 @@
-# 参与贡献 Obsidian Attachments Voyager (贡献者指南)
+# 贡献者指南
 
-首先，非常感谢你有兴趣为 **Obsidian Attachments Voyager** 做出贡献！🎉
-无论你是想修复一个 Bug、添加一个新特性，还是仅仅想改进这篇文档，你的帮助对我们都至关重要。
-
-为了让大家的协作更顺畅，避免你在环境配置上踩坑（特别是那些让人头疼的 C++ 库和底层依赖），请务必在提交代码前仔细阅读这份指南。
+感谢你有兴趣为 Obsidian Attachments Voyager 做出贡献！
 
 ---
 
-## 🛠 1. 环境准备 (Environment Setup)
+## 1. 环境准备
 
-本项目采用的是 **Tauri v1.x + React + Rust** 架构。
-**请绝对注意**：我们由于历史系统兼容性（如 Linux 环境下 `glib-2.0` 版本较低），特意将 Tauri 锁定在了 `1.5` 左右的版本。**请不要在提交 PR 时顺手“热心”地把 Tauri 升级到 v2**，否则会导致很多用户的构建直接原地爆炸💥！
+### 必需工具
 
-在开始之前，请确保你的电脑上安装了以下“三大件”：
+| 工具 | 版本要求 | 用途 |
+|------|---------|------|
+| Node.js | 18+ | 前端构建、测试 |
+| npm | 8+ | 包管理 |
+| Rust (rustc + cargo) | 1.70+ | 后端编译 |
+| Git | 2.30+ | 版本控制 |
 
-### ① Node.js & npm
-建议使用 **Node 18** 或 **Node 20**（LTS版本）。
-你可以通过终端验证：
+### 平台特定依赖
+
+**Windows**：无额外依赖，安装 Node.js 和 Rust 即可。
+
+**macOS**：
 ```bash
-node -v
-npm -v
+xcode-select --install
 ```
 
-### ② Rust & Cargo
-Tauri 后端基于 Rust 编写。如果你还没有安装 Rust，请前往官网使用 `rustup` 安装：
-[Rust 官方安装指南](https://www.rust-lang.org/tools/install)
-验证安装：
+**Linux (Ubuntu/Debian)**：
 ```bash
-rustc -V
-cargo -V
+sudo apt update && sudo apt install -y \
+  libwebkit2gtk-4.0-dev build-essential curl wget file \
+  libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
 ```
 
-### ③ 系统级依赖 (仅 Linux/开发者 必需)
-如果你在使用 Linux 桌面 (如 Ubuntu/Debian 容器)进行开发，你需要安装 WebKit 等图形界面开发包：
+### 验证环境
+
 ```bash
-sudo apt update
-sudo apt install libwebkit2gtk-4.0-dev build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+node -v && npm -v && rustc -V && cargo -V
 ```
+
+四个命令都应该输出版本号，没有报错。
 
 ---
 
-## 💻 2. 本地开发流程 (Local Development)
+## 2. 获取代码
 
-### 步骤 1：克隆仓库并安装依赖
-把代码拉到你本地后，首先进入项目根目录安装前端 Node 依赖：
 ```bash
+# Fork 本仓库后克隆你的 fork
+git clone https://github.com/YOUR_USERNAME/Obsidian-attachments-voyager.git
 cd Obsidian-attachments-voyager
+
+# 安装前端依赖
 npm install
 ```
 
-### 步骤 2：启动开发者模式 (边写边看)
-想要在修改 React 前端代码或 Rust 后端代码时实时看到效果？只需要一行命令：
+---
+
+## 3. 开发流程
+
+### 启动开发模式
+
 ```bash
 npm run tauri:dev
 ```
-这将启动 Vite 开发服务器，并自动打开一个 Tauri 桌面窗口。并且，当你修改 `src-tauri/src/` 下的 Rust 代码时，Tauri 会聪明地自动重新编译后端为你呈现最新效果。
 
-对于纯后端逻辑测试（TDD推荐方式）：
+这会同时启动 Vite 前端热重载和 Tauri 后端。修改前端代码会即时刷新，修改 Rust 代码会自动重新编译。
+
+### 仅测试前端
+
 ```bash
-cd src-tauri
-cargo test
+npm test                    # 运行全部 11 个测试
+npx tsc -b --noEmit         # TypeScript 类型检查（不生成文件）
 ```
 
----
+### 仅测试后端
 
-## 🚀 3. 打包构建与调试 (Building)
+```bash
+cd src-tauri
+cargo test                  # Rust 单元测试
+cargo clippy                # Lint 检查
+cargo fmt --check           # 格式检查
+```
 
-当你完成了开发，想要自己打个包试试看兼不兼容时：
+### 生产构建
+
 ```bash
 npm run tauri:build
 ```
-> **注意：**
-> 1. 打包生成的产物在哪？Windows 会在 `src-tauri/target/release/bundle/nsis` 吐出 `.exe`；Mac 会在 `bundle/dmg` 吐出 `.dmg`。
-> 2. 如果你在 Linux 下开发且遇到打包最后一步 `failed to build data folders...` 报错，那是因为系统找不到正确的图标文件。此时如果只想测试二进制文件，可以去 `src-tauri/tauri.conf.json` 把 `bundle.active` 临时改为 `false`。
+
+> 首次构建约 5-15 分钟（Rust crate 下载 + 编译），后续增量构建快很多。
 
 ---
 
-## 🔏 4. 提交代码流程 (PR Workflow)
+## 4. 项目架构
 
-我们非常欢迎你提交 Pull Request (PR)！请遵循以下简单的流程：
+### 前端（`src/`）
 
-1. **Fork 本仓库** 到你自己的 GitHub 账号下。
-2. **克隆(Clone)** 你 Fork 出来的仓库到本地。
-3. **创建一个新分支 (Branch)**，用来开发你的功能或修复 Bug：
-   ```bash
-   git checkout -b feature/your-awesome-feature
-   # 或者
-   git checkout -b fix/annoying-bug
-   ```
-4. **提交(Commit)** 你的修改。请尽量让你的 Commit message 描述清晰。一次提交只做一件事，**不要在同一提交中混合重构与新功能**。
-5. **推送到远程 (Push)**：
-   ```bash
-   git push origin feature/your-awesome-feature
-   ```
-6. 回到本项目的 GitHub 页面，点击 **Compare & pull request**，填写描述并提交！
+- **React 19** + **TypeScript 5.9** + **Vite 7** + **Recharts 3.7**
+- 组件在 `src/components/`，页面在 `src/pages/`，工具库在 `src/lib/`
+- 测试在 `src/__tests__/`，使用 **Vitest** + **@testing-library/react** + **jsdom**
+- 全局样式在 `src/index.css`（约 1270 行），使用 CSS 变量实现四套主题
+- 与后端通信通过 `@tauri-apps/api` 的 `invoke()` 函数 + `listen()` 事件监听
+
+#### 前端关键文件
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `pages/ScanPage.tsx` | ~1008 | 扫描页主逻辑（扫描/修复/选择/过滤/导出/全屏/右键菜单） |
+| `pages/StatsPage.tsx` | ~332 | 统计图表页（7 种 Recharts 可视化） |
+| `pages/MigratePage.tsx` | - | 笔记迁移页 |
+| `components/VirtualGallery.tsx` | - | 虚拟滚动画廊 |
+| `components/ProgressBar.tsx` | ~50 | 扫描进度条（三阶段 + 不定进度动画） |
+| `components/Toolbar.tsx` | - | 工具栏（扫描/修复/导出） |
+| `components/Sidebar.tsx` | - | 侧边栏（分类/搜索/筛选） |
+| `components/StatusBar.tsx` | - | 底部状态栏 + 日志抽屉 |
+
+### 后端（`src-tauri/src/`）
+
+- **Rust 2021 Edition** + **Tauri v1.5** + **Rayon 1.10**（多线程并行）
+- `main.rs`（557 行）：所有 Tauri 命令注册（`#[tauri::command]`），包含 `window.emit()` 进度推送
+- `scanner.rs`（240 行）：仓库扫描核心逻辑，Rayon `par_iter()` 并行缩略图生成
+- `parser.rs`：Markdown 图片链接提取（wiki link + 标准 markdown）
+- `models.rs`：`ScanIssue`、`ScanResult` 等数据结构（含 `file_mtime` 字段）
+- `ops_log.rs`（182 行）：操作历史 JSON 持久化
+- `thumb_cache.rs`（174 行）：三级 WebP 缩略图生成与缓存（哈希命名 + 一次打开多次缩放）
+
+### 前后端通信
+
+前端通过 `invoke('command_name', { params })` 调用后端 Rust 函数，返回 JSON 自动反序列化。所有命令定义在 `main.rs` 中。
+
+关键命令：
+
+| 命令 | 功能 |
+|------|------|
+| `scan_vault` | 扫描仓库，返回问题列表（接受 `window: tauri::Window` 参数推送进度） |
+| `fix_issues` | 执行修复（移动/删除） |
+| `undo_task` / `undo_entry` | 撤回操作 |
+| `execute_migration` | 笔记迁移 |
+| `open_file` / `open_file_parent` | 用系统程序打开文件/在文件管理器中显示 |
+| `clear_thumbnail_cache` | 清除全部缩略图缓存 |
+| `read_all_local_storage` | 读取本地设置（返回 `HashMap`，**不是数组**） |
+| `write_local_storage` | 写入本地设置 |
+| `read_local_storage` / `remove_local_storage` | 读取/删除单个设置 |
+| `write_text_file` | 写入导出文件 |
+| `get_runtime_logs` | 获取运行日志 |
+
+### 数据存储
+
+- **用户设置/缓存**：存储在 exe 同目录的 `voyager-data/` 文件夹，每个 key 一个 `.json` 文件
+- **缩略图缓存**：存储在扫描仓库根目录的 `.voyager-gallery-cache/`
+- **操作历史**：通过 `ops_log.rs` 以 JSON 持久化
 
 ---
 
-## 🛡️ 5. 安全边界与核心原则 (Security Boundaries)
+## 5. 代码规范
 
-由于这是一个对用户 Obsidian 本地笔记文件和图片进行操作的工具，**数据安全是我们的最高优先级底线！**
+### 前端 (TypeScript/React)
 
-在开发任何涉及文件操作的 Rust 代码时，请务必遵守以下原则：
+- 严格模式（`strict: true`）
+- 尽量不用 `any`，优先使用明确的类型
+- 组件用 PascalCase，文件名与组件名一致
+- 新组件放 `src/components/`，页面级放 `src/pages/`
+- CSS 不用 CSS-in-JS，统一写在 `src/index.css`，使用 `var(--xxx)` 主题变量
+- 提交前运行 `npx tsc -b --noEmit` 确保无类型错误
 
-- **只读先行，预览为主**：任何删除 (`trash/remove`) 或移动 (`rename/move`) 文件的动作，绝对不可以悄悄在后台自动执行。必须先通过 `ScanResult` 返回给前端，让用户在界面上“肉眼看到”并点击“确认执行”按钮后，才能触发破坏性动作。
-- **永远提供后悔药**：目前删除实现为直接 `fs::remove_file`（永久删除、不可自动撤回）。如果未来要改为“移入系统回收站”，请单独提交 PR 并补充测试与说明。
-- **出错立刻中止 (Fail Fast)**：如果在批量移动图片时，第 3 张图片移动失败（由于权限不足或目标已存在），程序必须立刻停下并向界面抛出明确的 Error 日志，严禁吞掉错误并继续盲目移动剩下的图片。
+### 后端 (Rust)
+
+- 提交前运行 `cargo fmt` 格式化
+- 提交前运行 `cargo clippy` 检查 lint
+- 新的 Tauri 命令必须在 `main.rs` 的 `generate_handler![]` 中注册
+- 数据结构加 `#[serde(rename_all = "camelCase")]` 保证前后端字段名匹配
+
+### 主题兼容
+
+- 所有颜色使用 CSS 变量（`var(--text-main)` 等），不要硬编码颜色值
+- 全屏图片查看器是例外，保持黑底
+- 新增 CSS 变量需要在 `:root`、`[data-theme="light"]`、`[data-theme="dark"]`、`[data-theme="parchment"]` 四个块中都定义
 
 ---
 
-## 📝 6. 代码规范 (Coding Standards)
+## 6. 测试
 
-保持代码整洁有助于后期维护：
-- **前端 (React/TS)**：我们使用 TypeScript。请尽量少用 `any`。遵循现有的 ESLint 规范。组件命名请保持 PascalCase。
-- **后端 (Rust)**：提交前请运行 `cargo fmt` 格式化代码，并用 `cargo clippy` 检查有没有明显的坏味道（warnings）。
+当前共 11 个前端测试用例，6 个测试文件：
+
+| 文件 | 内容 |
+|------|------|
+| `smoke.test.ts` | App 渲染、品牌名显示 |
+| `scan-page.test.tsx` | 目录选择、扫描、修复、全选 |
+| `fix-preview.test.tsx` | 修复前确认对话框 |
+| `migrate-page.test.tsx` | 迁移功能 |
+| `types-contract.test.ts` | 类型定义验证 |
+| `cargo-custom-protocol.test.ts` | Tauri 自定义协议配置 |
+
+运行测试：
+```bash
+npm test
+```
+
+### 测试注意事项
+
+- 测试环境是 jsdom，需要 mock **四个** Tauri API 模块：
+  - `@tauri-apps/api/tauri` — `invoke` 和 `convertFileSrc`
+  - `@tauri-apps/api/window` — `appWindow` 对象
+  - `@tauri-apps/api/dialog` — `open` 和 `save` 函数
+  - `@tauri-apps/api/event` — `listen` 函数（**Phase 6 新增，不 mock 会导致测试挂掉**）
+- `invoke` mock 需要根据命令名返回不同数据，特别是 `read_all_local_storage` **必须返回 `{}`（对象）**，不能返回 `[]`（数组），否则 `initStorage` 解析失败
+- `listen` mock 必须返回 `Promise.resolve(() => {})`（一个返回 unlisten 函数的 Promise）
+- `window.matchMedia` 在 jsdom 中不存在，需要在 `beforeEach` 中 mock
+- `ResizeObserver` 同样需要 mock
+- `selectedIssueIds` 在 ScanPage 中是 `Set<string>` 类型（不是数组），VirtualGallery 的 props 也对应为 `Set<string>`
+
+#### 测试 Mock 完整示例
+
+```typescript
+// 所有测试文件都需要以下四个 mock
+vi.mock('@tauri-apps/api/tauri', () => ({
+  invoke: vi.fn().mockImplementation((cmd: string) => {
+    if (cmd === 'read_all_local_storage') return Promise.resolve({})
+    return Promise.resolve([])
+  }),
+  convertFileSrc: (p: string) => `tauri-file://${p}`,
+}))
+
+vi.mock('@tauri-apps/api/dialog', () => ({
+  open: vi.fn(),
+  save: vi.fn(),
+}))
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
+}))
+
+vi.mock('@tauri-apps/api/window', () => ({
+  appWindow: {
+    isMaximized: () => Promise.resolve(false),
+    isFullscreen: () => Promise.resolve(false),
+    setFullscreen: () => Promise.resolve(),
+    minimize: () => Promise.resolve(),
+    toggleMaximize: () => Promise.resolve(),
+    close: () => Promise.resolve(),
+    onResized: () => Promise.resolve(() => {}),
+  },
+}))
+```
 
 ---
 
-感谢花时间阅读这份指南！
-如果准备好了，那就开始尽情 Hack 吧！✨
+## 7. 提交 PR
+
+1. **Fork** 本仓库
+2. **创建分支**：`git checkout -b feature/your-feature` 或 `fix/bug-description`
+3. **开发并测试**：确保 `npm test` 全部通过，`npx tsc -b --noEmit` 无错误
+4. **提交**：一次提交只做一件事，Commit message 描述清晰
+5. **推送**：`git push origin feature/your-feature`
+6. **创建 PR**：在 GitHub 上点击 "Compare & pull request"
+
+### PR 检查清单
+
+- [ ] `npx tsc -b --noEmit` 通过
+- [ ] `npm test` 全部通过
+- [ ] `cargo test`（如果改了 Rust 代码）通过
+- [ ] `cargo fmt --check` 无格式问题
+- [ ] 没有升级 Tauri 版本
+- [ ] 没有硬编码颜色（使用 CSS 变量）
+- [ ] 新功能有对应测试或说明
+
+---
+
+## 8. 安全原则
+
+本工具操作用户的本地文件，**数据安全是最高优先级**：
+
+- **只读先行**：任何删除/移动操作必须先扫描预览，用户确认后才执行
+- **永远可撤回**：所有修复操作记录在操作历史中，支持撤回（删除操作除外）
+- **出错即停**：批量操作遇到错误立即停止并报告，不吞错误继续
+- **不要 `unwrap()`**：Rust 代码中文件操作使用 `?` 或 `.map_err()` 传播错误，避免 panic
+
+---
+
+## 9. 重要提醒
+
+### 不要升级 Tauri 版本
+项目锁定 Tauri v1.5.0，因为 v2 要求 glib-2.0 >= 2.70，很多 Linux 环境不满足。
+
+### Docker/WSL 切换注意
+在 Windows 和 Linux 之间切换开发时，`node_modules` 中的原生二进制（rollup）不兼容：
+```bash
+rm -rf node_modules && npm install
+```
+每次切换平台后都需要重新安装。这是 rollup 原生 addon 的已知问题。
+
+### localStorage 已被替换
+项目不使用浏览器 localStorage，而是通过 Rust 后端将数据存储在 exe 同目录的 `voyager-data/` 文件夹。前端通过 `src/lib/storage.ts` 模块操作。
+
+### 扫描结果缓存键版本
+当前缓存键为 `voyager-cached-scan-result-v3`。**如果修改了 `ScanIssue`（Rust）或 `AuditIssue`（TypeScript）的数据结构，必须 bump 缓存版本号**（v3 → v4），否则旧缓存数据会导致新字段为 undefined。
+
+版本历史：
+- v1 → v2：添加 `fileSize` 字段
+- v2 → v3：添加 `fileMtime` 字段
+
+### 缩略图格式
+缩略图使用 WebP 格式（不是 PNG），缓存文件扩展名为 `.webp`。如果之前有旧的 PNG 缓存，需要在设置中点击「清除缩略图缓存」让系统重新生成 WebP 版本。
+
+---
+
+感谢你的贡献！
