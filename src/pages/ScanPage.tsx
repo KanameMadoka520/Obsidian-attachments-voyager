@@ -6,7 +6,7 @@ import IssuesTable from '../components/IssuesTable'
 import OperationHistoryPanel from '../components/OperationHistoryPanel'
 import StatsCards from '../components/StatsCards'
 import WorkLogPanel from '../components/WorkLogPanel'
-import type { AuditIssue, ConflictPolicy, OperationTask, RuntimeLogLine, ScanResult } from '../types'
+import type { AuditIssue, ConflictPolicy, GalleryDisplayMode, OperationTask, RuntimeLogLine, ScanResult } from '../types'
 import { scanVault } from '../lib/commands'
 
 interface FixSummary {
@@ -25,6 +25,13 @@ interface ScanPageProps {
 }
 
 const RECENT_VAULTS_KEY = 'voyager-recent-vaults-v1'
+const DISPLAY_MODE_KEY = 'voyager-display-mode-v1'
+
+function loadDisplayMode(): GalleryDisplayMode {
+  const raw = localStorage.getItem(DISPLAY_MODE_KEY)
+  if (raw === 'rawImage' || raw === 'noImage') return raw
+  return 'thumbnail'
+}
 
 function loadRecentVaults(): string[] {
   try {
@@ -72,7 +79,13 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
   const [listTab, setListTab] = useState<'orphan' | 'misplaced'>('orphan')
   const [trashDeleteIds, setTrashDeleteIds] = useState<string[]>([])
   const [generateThumbs, setGenerateThumbs] = useState(true)
+  const [displayMode, setDisplayMode] = useState<GalleryDisplayMode>(() => loadDisplayMode())
   const [galleryActionIssue, setGalleryActionIssue] = useState<AuditIssue | null>(null)
+
+  const changeDisplayMode = (mode: GalleryDisplayMode) => {
+    setDisplayMode(mode)
+    localStorage.setItem(DISPLAY_MODE_KEY, mode)
+  }
 
   const issues = result?.issues ?? []
   const orphanIssues = issues.filter((i) => i.type === 'orphan')
@@ -360,10 +373,26 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
 
               <div style={{ flex: 1 }} />
 
+              <select
+                value={displayMode}
+                onChange={(e) => changeDisplayMode(e.target.value as GalleryDisplayMode)}
+                style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--panel-bg)', color: 'inherit' }}
+              >
+                <option value="thumbnail">缩略图</option>
+                <option value="rawImage">原图直显</option>
+                <option value="noImage">不显示图片</option>
+              </select>
+
               <button type="button" className="btn btn-secondary" onClick={clearThumbnailCache}>
                 清除缩略图缓存
               </button>
             </div>
+
+            {displayMode === 'rawImage' && (
+              <div style={{ marginBottom: 12, padding: '8px 12px', background: 'rgba(255, 180, 0, 0.15)', border: '1px solid rgba(255, 180, 0, 0.4)', borderRadius: 6, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                ⚠ 原图直显对性能要求较高，图片越多要求越高，请谨慎选择。大量高分辨率图片可能导致内存占用增大和界面卡顿。
+              </div>
+            )}
 
             <div
               style={{
@@ -399,43 +428,72 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                       <input type="checkbox" readOnly checked={checked} />
                     </div>
                     <div
-                      style={{ position: 'relative', width: '100%', height: 120, borderRadius: 6, overflow: 'hidden', background: '#1111', cursor: 'zoom-in' }}
+                      style={{ position: 'relative', width: '100%', height: 120, borderRadius: 6, overflow: 'hidden', background: '#1111', cursor: displayMode === 'noImage' ? 'default' : 'zoom-in' }}
                       onClick={(e) => {
+                        if (displayMode === 'noImage') return
                         e.preventDefault()
                         e.stopPropagation()
                         setGalleryActionIssue(issue)
                       }}
                     >
-                      <div
-                        style={{
-                          position: 'absolute',
-                          inset: 0,
-                          display: 'grid',
-                          placeItems: 'center',
-                          color: 'var(--text-muted)',
-                          fontSize: '0.8rem',
-                          textAlign: 'center',
-                          padding: 8,
-                          boxSizing: 'border-box',
-                        }}
-                      >
-                        {issue.thumbnailPath ? '缩略图加载失败' : '未生成缩略图'}
-                      </div>
-
-                      {issue.thumbnailPath && (
-                        <img
-                          src={toThumbPreviewSrc(issue.thumbnailPath)}
-                          alt={issue.imagePath}
-                          loading="lazy"
-                          onLoad={(e) => {
-                            const placeholder = (e.currentTarget as HTMLImageElement).previousElementSibling as HTMLElement | null
-                            if (placeholder) placeholder.style.display = 'none'
-                          }}
-                          onError={(e) => {
-                            ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-                          }}
-                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
-                        />
+                      {displayMode === 'noImage' ? (
+                        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                          不显示图片
+                        </div>
+                      ) : displayMode === 'rawImage' ? (
+                        <>
+                          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                            加载中...
+                          </div>
+                          <img
+                            src={toFilePreviewSrc(issue.imagePath)}
+                            alt={issue.imagePath}
+                            loading="lazy"
+                            onLoad={(e) => {
+                              const placeholder = (e.currentTarget as HTMLImageElement).previousElementSibling as HTMLElement | null
+                              if (placeholder) placeholder.style.display = 'none'
+                            }}
+                            onError={(e) => {
+                              const placeholder = (e.currentTarget as HTMLImageElement).previousElementSibling as HTMLElement | null
+                              if (placeholder) placeholder.textContent = '图片加载失败'
+                              ;(e.currentTarget as HTMLImageElement).style.display = 'none'
+                            }}
+                            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <div
+                            style={{
+                              position: 'absolute',
+                              inset: 0,
+                              display: 'grid',
+                              placeItems: 'center',
+                              color: 'var(--text-muted)',
+                              fontSize: '0.8rem',
+                              textAlign: 'center',
+                              padding: 8,
+                              boxSizing: 'border-box',
+                            }}
+                          >
+                            {issue.thumbnailPath ? '缩略图加载失败' : '未生成缩略图'}
+                          </div>
+                          {issue.thumbnailPath && (
+                            <img
+                              src={toThumbPreviewSrc(issue.thumbnailPath)}
+                              alt={issue.imagePath}
+                              loading="lazy"
+                              onLoad={(e) => {
+                                const placeholder = (e.currentTarget as HTMLImageElement).previousElementSibling as HTMLElement | null
+                                if (placeholder) placeholder.style.display = 'none'
+                              }}
+                              onError={(e) => {
+                                ;(e.currentTarget as HTMLImageElement).style.display = 'none'
+                              }}
+                              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
+                            />
+                          )}
+                        </>
                       )}
                     </div>
                     <div style={{ marginTop: 6, fontSize: '0.8rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
@@ -530,14 +588,25 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
           >
             <div style={{ marginBottom: 16, textAlign: 'center' }}>
               <div style={{ position: 'relative', width: '100%', maxHeight: 300, borderRadius: 8, overflow: 'hidden', background: '#1111', marginBottom: 12 }}>
-                {galleryActionIssue.thumbnailPath ? (
+                {displayMode === 'thumbnail' && galleryActionIssue.thumbnailPath ? (
                   <img
                     src={toThumbPreviewSrc(galleryActionIssue.thumbnailPath)}
                     alt={galleryActionIssue.imagePath}
                     style={{ width: '100%', maxHeight: 300, objectFit: 'contain' }}
                   />
                 ) : (
-                  <div style={{ padding: 24, color: 'var(--text-muted)' }}>无预览</div>
+                  <img
+                    src={toFilePreviewSrc(galleryActionIssue.imagePath)}
+                    alt={galleryActionIssue.imagePath}
+                    style={{ width: '100%', maxHeight: 300, objectFit: 'contain' }}
+                    onError={(e) => {
+                      ;(e.currentTarget as HTMLImageElement).style.display = 'none'
+                      const fallback = document.createElement('div')
+                      fallback.textContent = '无法加载图片'
+                      fallback.style.cssText = 'padding:24px;color:var(--text-muted);text-align:center'
+                      ;(e.currentTarget as HTMLImageElement).parentElement?.appendChild(fallback)
+                    }}
+                  />
                 )}
               </div>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
