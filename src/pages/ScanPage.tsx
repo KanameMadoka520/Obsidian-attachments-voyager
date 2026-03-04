@@ -117,6 +117,22 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
   // null = fit-to-container, number = scale relative to image's natural pixel size (1 = 100% native)
   const [previewZoom, setPreviewZoom] = useState<number | null>(null)
   const [previewNaturalSize, setPreviewNaturalSize] = useState<{ w: number; h: number } | null>(null)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
+  // Track OS fullscreen state so we can show an exit button
+  useEffect(() => {
+    let mounted = true
+    const poll = setInterval(() => {
+      appWindow.isFullscreen().then((v) => { if (mounted) setIsFullscreen(v) }).catch(() => {})
+    }, 500)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        appWindow.isFullscreen().then((v) => { if (v) appWindow.setFullscreen(false) }).catch(() => {})
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => { mounted = false; clearInterval(poll); window.removeEventListener('keydown', onKey) }
+  }, [])
 
   // Drag-to-pan state
   const previewScrollRef = useRef<HTMLDivElement>(null)
@@ -467,28 +483,47 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                 Misplaced 画廊 ({misplacedIssues.length})
               </button>
 
-              <div style={{ flex: 1 }} />
-
-              <select
-                value={displayMode}
-                onChange={(e) => changeDisplayMode(e.target.value as GalleryDisplayMode)}
-                style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border-color)', background: 'var(--panel-bg)', color: 'inherit' }}
-              >
-                <option value="thumbnail">缩略图</option>
-                <option value="rawImage">原图直显</option>
-                <option value="noImage">不显示图片</option>
-              </select>
-
               <button type="button" className="btn btn-secondary" onClick={clearThumbnailCache}>
                 清除缩略图缓存
               </button>
             </div>
 
-            {displayMode === 'rawImage' && (
-              <div style={{ marginBottom: 12, padding: '8px 12px', background: 'rgba(255, 180, 0, 0.15)', border: '1px solid rgba(255, 180, 0, 0.4)', borderRadius: 6, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                ⚠ 原图直显对性能要求较高，图片越多要求越高，请谨慎选择。大量高分辨率图片可能导致内存占用增大和界面卡顿。
+            <div style={{
+              marginBottom: 12, padding: '10px 14px',
+              background: 'var(--panel-bg)', border: '1px solid var(--border-color)',
+              borderRadius: 8,
+            }}>
+              <div style={{ display: 'flex', gap: 0, marginBottom: 8 }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 600, marginRight: 12, lineHeight: '32px' }}>画廊显示模式：</span>
+                {([
+                  { value: 'thumbnail' as const, label: '缩略图' },
+                  { value: 'rawImage' as const, label: '原图直显' },
+                  { value: 'noImage' as const, label: '不显示图片' },
+                ] as const).map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => changeDisplayMode(opt.value)}
+                    style={{
+                      padding: '4px 16px', fontSize: '0.85rem', cursor: 'pointer',
+                      border: '1px solid var(--border-color)',
+                      borderRight: opt.value === 'noImage' ? '1px solid var(--border-color)' : 'none',
+                      borderRadius: opt.value === 'thumbnail' ? '6px 0 0 6px' : opt.value === 'noImage' ? '0 6px 6px 0' : '0',
+                      background: displayMode === opt.value ? 'var(--accent, #7b61ff)' : 'transparent',
+                      color: displayMode === opt.value ? '#fff' : 'inherit',
+                      fontWeight: displayMode === opt.value ? 600 : 400,
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
               </div>
-            )}
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                {displayMode === 'thumbnail' && '使用缩略图加载画廊和预览弹窗，性能最佳。点击放大查看时显示的是中等缩略图（1024px），非原始分辨率。'}
+                {displayMode === 'rawImage' && '⚠ 画廊和预览弹窗均直接加载原图，可获得最高清晰度，但大量高分辨率图片可能导致内存占用增大和界面卡顿。'}
+                {displayMode === 'noImage' && '画廊不加载任何图片，仅显示文件名，适合快速浏览文件列表。点击放大查看时仍可看到原图。'}
+              </div>
+            </div>
 
             <VirtualGallery
               issues={galleryTab === 'orphan' ? orphanIssues : misplacedIssues}
@@ -770,6 +805,27 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
 
       <WorkLogPanel logs={logs} />
       <OperationHistoryPanel tasks={tasks} onUndoTask={handleUndoTask} onUndoEntry={handleUndoEntry} />
+
+      {isFullscreen && (
+        <div style={{
+          position: 'fixed', top: 16, right: 16, zIndex: 9999,
+          display: 'flex', gap: 8, alignItems: 'center',
+          background: 'rgba(0,0,0,0.75)', borderRadius: 8, padding: '8px 16px',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+        }}>
+          <span style={{ color: '#fff', fontSize: '0.85rem' }}>全屏模式</span>
+          <button
+            type="button"
+            onClick={() => { appWindow.setFullscreen(false).catch(() => {}) }}
+            style={{
+              background: 'rgba(255,255,255,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)',
+              borderRadius: 6, padding: '4px 14px', cursor: 'pointer', fontSize: '0.85rem',
+            }}
+          >
+            退出全屏 (ESC)
+          </button>
+        </div>
+      )}
 
       <ConfirmDialog
         open={confirmOpen}
