@@ -16,6 +16,8 @@ export interface ScanResult {
   issues: AuditIssue[]
 }
 
+export type GalleryDisplayMode = 'thumbnail' | 'rawImage' | 'noImage'
+
 export type ConflictPolicy = 'promptEach' | 'overwriteAll' | 'renameAll'
 
 export interface OperationEntry {
