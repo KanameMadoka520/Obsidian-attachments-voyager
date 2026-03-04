@@ -416,3 +416,92 @@ body {
   text-align: center;
   color: var(--text-muted);
 }
+
+/* ─── Detail Panel ─── */
+.detail-panel {
+  width: 280px;
+  flex-shrink: 0;
+  background: var(--panel-bg);
+  border-left: 1px solid var(--border-color);
+  overflow-y: auto;
+}
+
+.detail-panel-inner {
+  padding: 12px;
+}
+
+.detail-preview {
+  width: 100%;
+  aspect-ratio: 1;
+  background: var(--bg-color);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 12px;
+  display: grid;
+  place-items: center;
+}
+
+.detail-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.detail-attrs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.detail-label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.detail-value {
+  font-size: 0.8rem;
+  color: var(--text-main);
+}
+
+.detail-value-path {
+  word-break: break-all;
+  font-size: 0.75rem;
+  font-family: monospace;
+}
+
+.detail-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detail-multi-select {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  border-radius: 4px;
+  color: var(--text-main);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.btn-sm:hover {
+  background: var(--bg-color);
+}
