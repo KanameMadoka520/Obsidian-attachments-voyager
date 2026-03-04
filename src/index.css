@@ -663,3 +663,99 @@ body {
   background: var(--danger-color);
   color: #fff;
 }
+
+/* ─── Toolbar ─── */
+.toolbar {
+  flex-shrink: 0;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border-color);
+  padding: 4px 10px;
+}
+
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.toolbar-path {
+  flex: 1;
+  min-width: 0;
+}
+
+.toolbar-input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 8px;
+  font-size: 0.78rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-color);
+  color: var(--text-main);
+  outline: none;
+}
+
+.toolbar-input:focus {
+  border-color: var(--primary-color);
+}
+
+.toolbar-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border-color);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+.toolbar-check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.toolbar-mode {
+  padding: 3px 10px;
+  font-size: 0.72rem;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.toolbar-mode:first-child { border-radius: 4px 0 0 4px; }
+.toolbar-mode:last-child { border-radius: 0 4px 4px 0; border-left: none; }
+.toolbar-mode:not(:first-child):not(:last-child) { border-left: none; }
+
+.toolbar-mode.active {
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+  color: #fff;
+}
+
+.btn-sm-primary {
+  background: var(--primary-color);
+  color: #fff;
+  border-color: var(--primary-color);
+}
+
+.btn-sm-primary:hover {
+  background: var(--primary-hover);
+}
+
+.btn-sm-danger {
+  background: var(--danger-color);
+  color: #fff;
+  border-color: var(--danger-color);
+}
