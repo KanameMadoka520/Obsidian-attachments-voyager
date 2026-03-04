@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { open } from '@tauri-apps/api/dialog'
 import { invoke, convertFileSrc } from '@tauri-apps/api/tauri'
 import ConfirmDialog from '../components/ConfirmDialog'
@@ -87,8 +87,60 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
   const [generateThumbs, setGenerateThumbs] = useState(true)
   const [displayMode, setDisplayMode] = useState<GalleryDisplayMode>(() => loadDisplayMode())
   const [galleryActionIssue, setGalleryActionIssue] = useState<AuditIssue | null>(null)
-  const [previewZoom, setPreviewZoom] = useState(1)
-  const [previewFullscreen, setPreviewFullscreen] = useState(false)
+  // null = fit-to-container, number = scale relative to image's natural pixel size (1 = 100% native)
+  const [previewZoom, setPreviewZoom] = useState<number | null>(null)
+  const [previewNaturalSize, setPreviewNaturalSize] = useState<{ w: number; h: number } | null>(null)
+
+  // Drag-to-pan state
+  const previewScrollRef = useRef<HTMLDivElement>(null)
+  const dragState = useRef<{ dragging: boolean; startX: number; startY: number; scrollLeft: number; scrollTop: number }>({
+    dragging: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0,
+  })
+
+  // Attach wheel handler as non-passive native listener so preventDefault works
+  const wheelZoomRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = wheelZoomRef.current
+    if (!el) return
+    const handler = (e: WheelEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setPreviewZoom((prev) => {
+        const current = prev ?? 0.5
+        const delta = e.deltaY < 0 ? 0.15 : -0.15
+        return Math.max(0.1, Math.min(8, current + delta))
+      })
+    }
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
+  })
+
+  const handlePreviewMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return
+    const el = previewScrollRef.current
+    if (!el) return
+    dragState.current = { dragging: true, startX: e.clientX, startY: e.clientY, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop }
+    e.preventDefault()
+  }, [])
+
+  const handlePreviewMouseMove = useCallback((e: React.MouseEvent) => {
+    const ds = dragState.current
+    if (!ds.dragging) return
+    const el = previewScrollRef.current
+    if (!el) return
+    el.scrollLeft = ds.scrollLeft - (e.clientX - ds.startX)
+    el.scrollTop = ds.scrollTop - (e.clientY - ds.startY)
+  }, [])
+
+  const handlePreviewMouseUp = useCallback(() => {
+    dragState.current.dragging = false
+  }, [])
+
+  const handlePreviewClick = useCallback(() => {
+    // Toggle between fit and native size on click (only if not dragging)
+    if (dragState.current.dragging) return
+    setPreviewZoom((prev) => (prev === null ? 1 : null))
+  }, [])
 
   const changeDisplayMode = (mode: GalleryDisplayMode) => {
     setDisplayMode(mode)
@@ -474,8 +526,8 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
         const currentIdx = currentList.findIndex((i) => i.id === galleryActionIssue.id)
         const hasPrev = currentIdx > 0
         const hasNext = currentIdx < currentList.length - 1
-        const goPrev = () => { if (hasPrev) { setGalleryActionIssue(currentList[currentIdx - 1]); setPreviewZoom(1); setPreviewFullscreen(false) } }
-        const goNext = () => { if (hasNext) { setGalleryActionIssue(currentList[currentIdx + 1]); setPreviewZoom(1); setPreviewFullscreen(false) } }
+        const goPrev = () => { if (hasPrev) { setGalleryActionIssue(currentList[currentIdx - 1]); setPreviewZoom(null); setPreviewNaturalSize(null) } }
+        const goNext = () => { if (hasNext) { setGalleryActionIssue(currentList[currentIdx + 1]); setPreviewZoom(null); setPreviewNaturalSize(null) } }
 
         return (
           <div
@@ -487,11 +539,11 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
               placeItems: 'center',
               zIndex: 1000,
             }}
-            onClick={() => setGalleryActionIssue(null)}
+            onClick={() => { setGalleryActionIssue(null); setPreviewZoom(null); setPreviewNaturalSize(null) }}
             onKeyDown={(e) => {
               if (e.key === 'ArrowLeft') goPrev()
               else if (e.key === 'ArrowRight') goNext()
-              else if (e.key === 'Escape') setGalleryActionIssue(null)
+              else if (e.key === 'Escape') { setGalleryActionIssue(null); setPreviewZoom(null); setPreviewNaturalSize(null) }
             }}
             tabIndex={0}
             ref={(el) => el?.focus()}
@@ -524,72 +576,85 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                 ›
               </button>
             )}
-            {previewFullscreen ? (
-              <div
-                style={{
-                  position: 'fixed', inset: 0, zIndex: 1002, background: 'rgba(0,0,0,0.92)',
-                  overflow: 'auto', cursor: 'grab',
-                }}
-                onClick={(e) => { e.stopPropagation(); setPreviewFullscreen(false) }}
-              >
-                <div style={{ position: 'fixed', top: 12, right: 12, zIndex: 1003, display: 'flex', gap: 8 }}>
-                  <span style={{ color: '#fff', fontSize: '0.85rem', lineHeight: '32px' }}>100% 原图 — 点击任意处关闭</span>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); setPreviewFullscreen(false) }}
-                    style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 12px', cursor: 'pointer' }}
-                  >
-                    关闭
-                  </button>
-                </div>
-                <img
-                  src={toFilePreviewSrc(galleryActionIssue.imagePath)}
-                  alt={galleryActionIssue.imagePath}
-                  onClick={(e) => e.stopPropagation()}
-                  style={{ display: 'block', margin: '48px auto', cursor: 'default' }}
-                />
+            <div
+              style={{
+                background: 'var(--panel-bg, #fff)',
+                borderRadius: 12,
+                padding: 24,
+                minWidth: 320,
+                maxWidth: '90vw',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ marginBottom: 8, textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                {currentIdx + 1} / {currentList.length}
+                {previewZoom !== null && previewNaturalSize
+                  ? ` · ${Math.round(previewZoom * 100)}%`
+                  : ' · 自适应'}
+                {' · 滚轮缩放 / 点击切换 / 拖拽平移'}
               </div>
-            ) : (
-              <div
-                style={{
-                  background: 'var(--panel-bg, #fff)',
-                  borderRadius: 12,
-                  padding: 24,
-                  minWidth: 320,
-                  maxWidth: '90vw',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div style={{ marginBottom: 8, textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  {currentIdx + 1} / {currentList.length}
-                  {previewZoom !== 1 && ` · ${Math.round(previewZoom * 100)}%`}
-                </div>
-                <div style={{ marginBottom: 16, textAlign: 'center' }}>
-                  <div
-                    style={{
-                      position: 'relative', width: '100%', maxHeight: 400, borderRadius: 8,
-                      overflow: 'auto', background: '#1111', marginBottom: 12, cursor: 'zoom-in',
-                    }}
-                    onWheel={(e) => {
-                      e.stopPropagation()
-                      setPreviewZoom((prev) => {
-                        const next = prev + (e.deltaY < 0 ? 0.15 : -0.15)
-                        return Math.max(0.2, Math.min(5, next))
-                      })
-                    }}
-                  >
-                    {displayMode === 'thumbnail' && (galleryActionIssue.thumbnailPaths || galleryActionIssue.thumbnailPath) ? (
+              <div style={{ marginBottom: 16, textAlign: 'center' }}>
+                <div
+                  ref={(el) => {
+                    (previewScrollRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+                    (wheelZoomRef as React.MutableRefObject<HTMLDivElement | null>).current = el
+                  }}
+                  style={{
+                    position: 'relative',
+                    width: '100%',
+                    maxHeight: 400,
+                    borderRadius: 8,
+                    overflow: previewZoom !== null ? 'auto' : 'hidden',
+                    background: '#1111',
+                    marginBottom: 12,
+                    cursor: dragState.current.dragging
+                      ? 'grabbing'
+                      : previewZoom !== null
+                        ? 'grab'
+                        : 'zoom-in',
+                  }}
+                  onMouseDown={previewZoom !== null ? handlePreviewMouseDown : undefined}
+                  onMouseMove={previewZoom !== null ? handlePreviewMouseMove : undefined}
+                  onMouseUp={handlePreviewMouseUp}
+                  onMouseLeave={handlePreviewMouseUp}
+                >
+                  {(() => {
+                    const imgSrc = displayMode === 'thumbnail' && (galleryActionIssue.thumbnailPaths || galleryActionIssue.thumbnailPath)
+                      ? (getThumbSrc(galleryActionIssue, 'medium') || getThumbSrc(galleryActionIssue, 'small'))
+                      : toFilePreviewSrc(galleryActionIssue.imagePath)
+
+                    // Fit mode: image fits inside container with object-fit contain
+                    // Zoom mode: image rendered at naturalWidth * zoom pixels
+                    const isFit = previewZoom === null
+                    const imgStyle: React.CSSProperties = isFit
+                      ? { maxWidth: '100%', maxHeight: 400, objectFit: 'contain' as const, display: 'block', margin: '0 auto' }
+                      : {
+                          width: previewNaturalSize ? previewNaturalSize.w * previewZoom : undefined,
+                          height: previewNaturalSize ? previewNaturalSize.h * previewZoom : undefined,
+                          display: 'block',
+                          margin: '0 auto',
+                        }
+
+                    return (
                       <img
-                        src={getThumbSrc(galleryActionIssue, 'medium') || getThumbSrc(galleryActionIssue, 'small')}
+                        src={imgSrc}
                         alt={galleryActionIssue.imagePath}
-                        style={{ width: `${previewZoom * 100}%`, objectFit: 'contain', transition: 'width 0.1s ease' }}
-                      />
-                    ) : (
-                      <img
-                        src={toFilePreviewSrc(galleryActionIssue.imagePath)}
-                        alt={galleryActionIssue.imagePath}
-                        style={{ width: `${previewZoom * 100}%`, objectFit: 'contain', transition: 'width 0.1s ease' }}
+                        draggable={false}
+                        style={imgStyle}
+                        onClick={(e) => {
+                          // Only toggle zoom if user didn't drag
+                          const ds = dragState.current
+                          const dx = Math.abs(e.clientX - ds.startX)
+                          const dy = Math.abs(e.clientY - ds.startY)
+                          if (dx < 5 && dy < 5) {
+                            handlePreviewClick()
+                          }
+                        }}
+                        onLoad={(e) => {
+                          const img = e.currentTarget
+                          setPreviewNaturalSize({ w: img.naturalWidth, h: img.naturalHeight })
+                        }}
                         onError={(e) => {
                           ;(e.currentTarget as HTMLImageElement).style.display = 'none'
                           const fallback = document.createElement('div')
@@ -598,57 +663,67 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                           ;(e.currentTarget as HTMLImageElement).parentElement?.appendChild(fallback)
                         }}
                       />
-                    )}
-                  </div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
-                    {galleryActionIssue.imagePath}
-                  </div>
+                    )
+                  })()}
                 </div>
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={() => {
-                      void handleOpenFile(galleryActionIssue.imagePath)
-                      setGalleryActionIssue(null)
-                    }}
-                  >
-                    打开文件
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => {
-                      void handleOpenFolder(galleryActionIssue.imagePath)
-                      setGalleryActionIssue(null)
-                    }}
-                  >
-                    打开目录
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => { setPreviewFullscreen(true); setPreviewZoom(1) }}
-                  >
-                    全屏原图
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => setPreviewZoom(1)}
-                  >
-                    重置缩放
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => { setGalleryActionIssue(null); setPreviewZoom(1); setPreviewFullscreen(false) }}
-                  >
-                    取消
-                  </button>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
+                  {galleryActionIssue.imagePath}
                 </div>
               </div>
-            )}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => {
+                    void handleOpenFile(galleryActionIssue.imagePath)
+                    setGalleryActionIssue(null)
+                  }}
+                >
+                  打开文件
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    void handleOpenFolder(galleryActionIssue.imagePath)
+                    setGalleryActionIssue(null)
+                  }}
+                >
+                  打开目录
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    document.documentElement.requestFullscreen?.().catch(() => {})
+                  }}
+                >
+                  全屏原图
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setPreviewZoom(null)}
+                >
+                  重置缩放
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setPreviewZoom(1)}
+                  disabled={!previewNaturalSize}
+                >
+                  100% 原始尺寸
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => { setGalleryActionIssue(null); setPreviewZoom(null); setPreviewNaturalSize(null) }}
+                >
+                  取消
+                </button>
+              </div>
+            </div>
           </div>
         )
       })()}
