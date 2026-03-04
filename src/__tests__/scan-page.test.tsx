@@ -26,6 +26,26 @@ beforeEach(() => {
   openMock.mockReset()
   invokeMock.mockReset()
   vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+  // Mock ResizeObserver and element dimensions for VirtualGallery
+  global.ResizeObserver = class {
+    private callback: ResizeObserverCallback
+    constructor(cb: ResizeObserverCallback) { this.callback = cb }
+    observe() {
+      this.callback([{ contentRect: { width: 800 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver)
+    }
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver
+
+  // jsdom has 0 for all layout properties; virtualizer needs real dimensions
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return 600 } })
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return 800 } })
+  Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get() { return 2000 } })
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get() { return 600 } })
+  Element.prototype.getBoundingClientRect = () => ({
+    top: 0, left: 0, bottom: 600, right: 800, width: 800, height: 600, x: 0, y: 0, toJSON: () => {},
+  })
 })
 
 test('choosing directory fills vault path input', async () => {

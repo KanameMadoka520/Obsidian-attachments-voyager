@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { expect, test, vi } from 'vitest'
+import { beforeEach, expect, test, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/tauri'
 import ScanPage from '../pages/ScanPage'
 
@@ -10,6 +10,20 @@ vi.mock('@tauri-apps/api/tauri', () => ({
 }))
 
 const invokeMock = vi.mocked(invoke)
+
+beforeEach(() => {
+  global.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return 600 } })
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return 800 } })
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get() { return 600 } })
+  Element.prototype.getBoundingClientRect = () => ({
+    top: 0, left: 0, bottom: 600, right: 800, width: 800, height: 600, x: 0, y: 0, toJSON: () => {},
+  })
+})
 
 test('requires confirmation before execute', async () => {
   invokeMock.mockImplementation((cmd: string) => {

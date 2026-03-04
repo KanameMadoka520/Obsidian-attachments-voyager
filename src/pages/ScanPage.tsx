@@ -5,6 +5,7 @@ import ConfirmDialog from '../components/ConfirmDialog'
 import IssuesTable from '../components/IssuesTable'
 import OperationHistoryPanel from '../components/OperationHistoryPanel'
 import StatsCards from '../components/StatsCards'
+import VirtualGallery from '../components/VirtualGallery'
 import WorkLogPanel from '../components/WorkLogPanel'
 import type { AuditIssue, ConflictPolicy, GalleryDisplayMode, OperationTask, RuntimeLogLine, ScanResult } from '../types'
 import { scanVault } from '../lib/commands'
@@ -399,120 +400,16 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
               </div>
             )}
 
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
-                gap: 12,
-              }}
-            >
-              {(galleryTab === 'orphan' ? orphanIssues : misplacedIssues).map((issue) => {
-                const issueIndex = issueIndexMap.get(issue.id) ?? -1
-                const checked = selectedIssueIds.includes(issue.id)
-                return (
-                  <label
-                      key={issue.id}
-                      style={{
-                        border: checked ? '2px solid var(--primary-color)' : '1px solid var(--border-color)',
-                        borderRadius: 8,
-                        padding: 8,
-                        background: 'var(--panel-bg)',
-                        cursor: 'pointer',
-                      }}
-                      onClick={(e) => {
-                        if (issueIndex >= 0) {
-                          handleIssueRowClick(issue.id, issueIndex, {
-                            shiftKey: e.shiftKey,
-                            ctrlKey: e.ctrlKey,
-                            metaKey: e.metaKey,
-                          })
-                        }
-                      }}
-                    >
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
-                      <input type="checkbox" readOnly checked={checked} />
-                    </div>
-                    <div
-                      style={{ position: 'relative', width: '100%', height: 120, borderRadius: 6, overflow: 'hidden', background: '#1111', cursor: displayMode === 'noImage' ? 'default' : 'zoom-in' }}
-                      onClick={(e) => {
-                        if (displayMode === 'noImage') return
-                        e.preventDefault()
-                        e.stopPropagation()
-                        setGalleryActionIssue(issue)
-                      }}
-                    >
-                      {displayMode === 'noImage' ? (
-                        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                          不显示图片
-                        </div>
-                      ) : displayMode === 'rawImage' ? (
-                        <>
-                          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                            加载中...
-                          </div>
-                          <img
-                            src={toFilePreviewSrc(issue.imagePath)}
-                            alt={issue.imagePath}
-                            loading="lazy"
-                            onLoad={(e) => {
-                              const placeholder = (e.currentTarget as HTMLImageElement).previousElementSibling as HTMLElement | null
-                              if (placeholder) placeholder.style.display = 'none'
-                            }}
-                            onError={(e) => {
-                              const placeholder = (e.currentTarget as HTMLImageElement).previousElementSibling as HTMLElement | null
-                              if (placeholder) placeholder.textContent = '图片加载失败'
-                              ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-                            }}
-                            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
-                          />
-                        </>
-                      ) : (
-                        <>
-                          <div
-                            style={{
-                              position: 'absolute',
-                              inset: 0,
-                              display: 'grid',
-                              placeItems: 'center',
-                              color: 'var(--text-muted)',
-                              fontSize: '0.8rem',
-                              textAlign: 'center',
-                              padding: 8,
-                              boxSizing: 'border-box',
-                            }}
-                          >
-                            {(issue.thumbnailPaths || issue.thumbnailPath) ? '缩略图加载失败' : '未生成缩略图'}
-                          </div>
-                          {(issue.thumbnailPaths || issue.thumbnailPath) && (
-                            <img
-                              src={getThumbSrc(issue, 'small')}
-                              alt={issue.imagePath}
-                              loading="lazy"
-                              onLoad={(e) => {
-                                const placeholder = (e.currentTarget as HTMLImageElement).previousElementSibling as HTMLElement | null
-                                if (placeholder) placeholder.style.display = 'none'
-                              }}
-                              onError={(e) => {
-                                ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-                              }}
-                              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
-                            />
-                          )}
-                        </>
-                      )}
-                    </div>
-                    <div style={{ marginTop: 6, fontSize: '0.8rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
-                      {issue.imagePath}
-                    </div>
-                    {issue.type === 'misplaced' && (
-                      <div style={{ marginTop: 4, fontSize: '0.78rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
-                        建议路径：{issue.suggestedTarget ?? '-'}
-                      </div>
-                    )}
-                  </label>
-                )
-              })}
-            </div>
+            <VirtualGallery
+              issues={galleryTab === 'orphan' ? orphanIssues : misplacedIssues}
+              displayMode={displayMode}
+              selectedIssueIds={selectedIssueIds}
+              issueIndexMap={issueIndexMap}
+              toFilePreviewSrc={toFilePreviewSrc}
+              getThumbSrc={getThumbSrc}
+              onIssueClick={handleIssueRowClick}
+              onPreviewClick={setGalleryActionIssue}
+            />
           </section>
 
           <div className="results-wrapper">
