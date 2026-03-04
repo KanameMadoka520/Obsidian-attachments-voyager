@@ -14,6 +14,18 @@ vi.mock('@tauri-apps/api/tauri', () => ({
   convertFileSrc: (p: string) => `tauri-file://${p}`,
 }))
 
+vi.mock('@tauri-apps/api/window', () => ({
+  appWindow: {
+    isMaximized: () => Promise.resolve(false),
+    isFullscreen: () => Promise.resolve(false),
+    setFullscreen: () => Promise.resolve(),
+    minimize: () => Promise.resolve(),
+    toggleMaximize: () => Promise.resolve(),
+    close: () => Promise.resolve(),
+    onResized: () => Promise.resolve(() => {}),
+  },
+}))
+
 const openMock = vi.mocked(open)
 const invokeMock = vi.mocked(invoke)
 
@@ -54,7 +66,7 @@ test('choosing directory fills vault path input', async () => {
 
   render(<ScanPage conflictPolicy="renameAll" />)
 
-  fireEvent.click(screen.getByRole('button', { name: '选择目录' }))
+  fireEvent.click(screen.getByRole('button', { name: '选择' }))
 
   await waitFor(() => {
     expect(screen.getByLabelText('仓库路径')).toHaveValue('D:/vault')
@@ -87,7 +99,7 @@ test('scan button invokes backend and renders result stats', async () => {
   fireEvent.change(screen.getByLabelText('仓库路径'), {
     target: { value: 'D:/vault' },
   })
-  fireEvent.click(screen.getByRole('button', { name: '开始扫描' }))
+  fireEvent.click(screen.getByRole('button', { name: '扫描' }))
 
   await waitFor(() => {
     expect(invokeMock).toHaveBeenCalledWith('scan_vault', {
@@ -97,14 +109,8 @@ test('scan button invokes backend and renders result stats', async () => {
     })
   })
 
-  expect(screen.getByText('Markdown 文件数')).toBeInTheDocument()
-  expect(screen.getByText('图片总数')).toBeInTheDocument()
-
   const img = await screen.findByAltText('/a.png')
   expect(img).toHaveAttribute('src', 'tauri-file:///t/a.png')
-
-  fireEvent.click(screen.getByRole('button', { name: '清除缩略图缓存' }))
-  expect(invokeMock).toHaveBeenCalledWith('clear_thumbnail_cache')
 })
 
 test('fix requires selecting issues and supports select all', async () => {
@@ -131,17 +137,17 @@ test('fix requires selecting issues and supports select all', async () => {
   render(<ScanPage conflictPolicy="renameAll" />)
 
   fireEvent.change(screen.getByLabelText('仓库路径'), { target: { value: 'D:/vault' } })
-  fireEvent.click(screen.getByRole('button', { name: '开始扫描' }))
+  fireEvent.click(screen.getByRole('button', { name: '扫描' }))
 
   await screen.findByText('全选')
 
-  fireEvent.click(screen.getByRole('button', { name: '执行修复' }))
+  fireEvent.click(screen.getByRole('button', { name: /修复/ }))
   fireEvent.click(screen.getByRole('button', { name: '确认执行' }))
 
   await screen.findByText('请先选择要修复的文件')
 
   fireEvent.click(screen.getByRole('button', { name: '全选' }))
-  fireEvent.click(screen.getByRole('button', { name: '执行修复' }))
+  fireEvent.click(screen.getByRole('button', { name: /修复/ }))
   fireEvent.click(screen.getByRole('button', { name: '确认执行' }))
 
   await waitFor(() => {

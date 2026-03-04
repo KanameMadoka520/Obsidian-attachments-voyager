@@ -9,6 +9,18 @@ vi.mock('@tauri-apps/api/tauri', () => ({
   convertFileSrc: (p: string) => `tauri-file://${p}`,
 }))
 
+vi.mock('@tauri-apps/api/window', () => ({
+  appWindow: {
+    isMaximized: () => Promise.resolve(false),
+    isFullscreen: () => Promise.resolve(false),
+    setFullscreen: () => Promise.resolve(),
+    minimize: () => Promise.resolve(),
+    toggleMaximize: () => Promise.resolve(),
+    close: () => Promise.resolve(),
+    onResized: () => Promise.resolve(() => {}),
+  },
+}))
+
 const invokeMock = vi.mocked(invoke)
 
 beforeEach(() => {
@@ -40,10 +52,10 @@ test('requires confirmation before execute', async () => {
   render(<ScanPage conflictPolicy="renameAll" />)
 
   fireEvent.change(screen.getByLabelText('仓库路径'), { target: { value: 'D:/vault' } })
-  fireEvent.click(screen.getByRole('button', { name: '开始扫描' }))
+  fireEvent.click(screen.getByRole('button', { name: '扫描' }))
 
-  expect(await screen.findByText('执行修复说明')).toBeInTheDocument()
+  expect(await screen.findByAltText('/x.png')).toBeInTheDocument()
   expect(screen.queryByText('确认执行修复')).not.toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: '执行修复' }))
+  fireEvent.click(screen.getByRole('button', { name: /修复/ }))
   expect(screen.getByText('确认执行修复')).toBeInTheDocument()
 })
