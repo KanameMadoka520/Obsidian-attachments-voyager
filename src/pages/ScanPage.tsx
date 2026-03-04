@@ -72,6 +72,7 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
   const [listTab, setListTab] = useState<'orphan' | 'misplaced'>('orphan')
   const [trashDeleteIds, setTrashDeleteIds] = useState<string[]>([])
   const [generateThumbs, setGenerateThumbs] = useState(true)
+  const [galleryActionIssue, setGalleryActionIssue] = useState<AuditIssue | null>(null)
 
   const issues = result?.issues ?? []
   const orphanIssues = issues.filter((i) => i.type === 'orphan')
@@ -394,11 +395,17 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                         }
                       }}
                     >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <strong style={{ fontSize: '0.85rem' }}>{issue.type}</strong>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
                       <input type="checkbox" readOnly checked={checked} />
                     </div>
-                    <div style={{ position: 'relative', width: '100%', height: 120, borderRadius: 6, overflow: 'hidden', background: '#1111' }}>
+                    <div
+                      style={{ position: 'relative', width: '100%', height: 120, borderRadius: 6, overflow: 'hidden', background: '#1111', cursor: 'zoom-in' }}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setGalleryActionIssue(issue)
+                      }}
+                    >
                       <div
                         style={{
                           position: 'absolute',
@@ -439,9 +446,6 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                         建议路径：{issue.suggestedTarget ?? '-'}
                       </div>
                     )}
-                    <div style={{ marginTop: 4, fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                      点击卡片可选中/取消
-                    </div>
                   </label>
                 )
               })}
@@ -499,6 +503,78 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
             </section>
           </div>
         </>
+      )}
+
+      {galleryActionIssue && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'grid',
+            placeItems: 'center',
+            zIndex: 1000,
+          }}
+          onClick={() => setGalleryActionIssue(null)}
+        >
+          <div
+            style={{
+              background: 'var(--panel-bg, #fff)',
+              borderRadius: 12,
+              padding: 24,
+              minWidth: 320,
+              maxWidth: '90vw',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ marginBottom: 16, textAlign: 'center' }}>
+              <div style={{ position: 'relative', width: '100%', maxHeight: 300, borderRadius: 8, overflow: 'hidden', background: '#1111', marginBottom: 12 }}>
+                {galleryActionIssue.thumbnailPath ? (
+                  <img
+                    src={toThumbPreviewSrc(galleryActionIssue.thumbnailPath)}
+                    alt={galleryActionIssue.imagePath}
+                    style={{ width: '100%', maxHeight: 300, objectFit: 'contain' }}
+                  />
+                ) : (
+                  <div style={{ padding: 24, color: 'var(--text-muted)' }}>无预览</div>
+                )}
+              </div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
+                {galleryActionIssue.imagePath}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  void handleOpenFile(galleryActionIssue.imagePath)
+                  setGalleryActionIssue(null)
+                }}
+              >
+                打开文件
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  void handleOpenFolder(galleryActionIssue.imagePath)
+                  setGalleryActionIssue(null)
+                }}
+              >
+                打开目录
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setGalleryActionIssue(null)}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <WorkLogPanel logs={logs} />
