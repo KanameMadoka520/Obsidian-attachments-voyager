@@ -117,22 +117,45 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
   // null = fit-to-container, number = scale relative to image's natural pixel size (1 = 100% native)
   const [previewZoom, setPreviewZoom] = useState<number | null>(null)
   const [previewNaturalSize, setPreviewNaturalSize] = useState<{ w: number; h: number } | null>(null)
-  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [fullscreenIssue, setFullscreenIssue] = useState<AuditIssue | null>(null)
+  const [fsZoom, setFsZoom] = useState<number | null>(null)
+  const [fsNatural, setFsNatural] = useState<{ w: number; h: number } | null>(null)
+  const fsScrollRef = useRef<HTMLDivElement>(null)
+  const fsDragState = useRef<{ dragging: boolean; startX: number; startY: number; scrollLeft: number; scrollTop: number }>({
+    dragging: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0,
+  })
+  const fsWheelRef = useRef<HTMLDivElement>(null)
 
-  // Track OS fullscreen state so we can show an exit button
-  useEffect(() => {
-    let mounted = true
-    const poll = setInterval(() => {
-      appWindow.isFullscreen().then((v) => { if (mounted) setIsFullscreen(v) }).catch(() => {})
-    }, 500)
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        appWindow.isFullscreen().then((v) => { if (v) appWindow.setFullscreen(false) }).catch(() => {})
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => { mounted = false; clearInterval(poll); window.removeEventListener('keydown', onKey) }
+  const enterFullscreen = useCallback((issue: AuditIssue) => {
+    setFullscreenIssue(issue)
+    setFsZoom(null)
+    setFsNatural(null)
+    appWindow.setFullscreen(true).catch(() => {})
   }, [])
+
+  const exitFullscreen = useCallback(() => {
+    setFullscreenIssue(null)
+    setFsZoom(null)
+    setFsNatural(null)
+    appWindow.setFullscreen(false).catch(() => {})
+  }, [])
+
+  // Fullscreen wheel zoom (non-passive)
+  useEffect(() => {
+    const el = fsWheelRef.current
+    if (!el) return
+    const handler = (e: WheelEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setFsZoom((prev) => {
+        const current = prev ?? 0.5
+        const delta = e.deltaY < 0 ? 0.15 : -0.15
+        return Math.max(0.1, Math.min(10, current + delta))
+      })
+    }
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
+  })
 
   // Drag-to-pan state
   const previewScrollRef = useRef<HTMLDivElement>(null)
@@ -767,11 +790,7 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => {
-                    appWindow.isFullscreen().then((isFull) => {
-                      appWindow.setFullscreen(!isFull)
-                    }).catch(() => {})
-                  }}
+                  onClick={() => enterFullscreen(galleryActionIssue)}
                 >
                   全屏原图
                 </button>
@@ -806,26 +825,140 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
       <WorkLogPanel logs={logs} />
       <OperationHistoryPanel tasks={tasks} onUndoTask={handleUndoTask} onUndoEntry={handleUndoEntry} />
 
-      {isFullscreen && (
-        <div style={{
-          position: 'fixed', top: 16, right: 16, zIndex: 9999,
-          display: 'flex', gap: 8, alignItems: 'center',
-          background: 'rgba(0,0,0,0.75)', borderRadius: 8, padding: '8px 16px',
-          boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
-        }}>
-          <span style={{ color: '#fff', fontSize: '0.85rem' }}>全屏模式</span>
-          <button
-            type="button"
-            onClick={() => { appWindow.setFullscreen(false).catch(() => {}) }}
-            style={{
-              background: 'rgba(255,255,255,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)',
-              borderRadius: 6, padding: '4px 14px', cursor: 'pointer', fontSize: '0.85rem',
+      {fullscreenIssue && (() => {
+        const currentList = galleryTab === 'orphan' ? orphanIssues : misplacedIssues
+        const fsIdx = currentList.findIndex((i) => i.id === fullscreenIssue.id)
+        const fsPrev = fsIdx > 0 ? currentList[fsIdx - 1] : null
+        const fsNext = fsIdx < currentList.length - 1 ? currentList[fsIdx + 1] : null
+
+        const isFit = fsZoom === null
+        const imgStyle: React.CSSProperties = isFit
+          ? { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' as const, display: 'block', margin: 'auto' }
+          : {
+              width: fsNatural ? fsNatural.w * fsZoom : undefined,
+              height: fsNatural ? fsNatural.h * fsZoom : undefined,
+              display: 'block', margin: 'auto',
+            }
+
+        return (
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 10000, background: '#000', display: 'flex', flexDirection: 'column' }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') exitFullscreen()
+              else if (e.key === 'ArrowLeft' && fsPrev) { setFullscreenIssue(fsPrev); setFsZoom(null); setFsNatural(null) }
+              else if (e.key === 'ArrowRight' && fsNext) { setFullscreenIssue(fsNext); setFsZoom(null); setFsNatural(null) }
             }}
+            tabIndex={0}
+            ref={(el) => el?.focus()}
           >
-            退出全屏 (ESC)
-          </button>
-        </div>
-      )}
+            {/* Top bar */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '8px 16px', background: 'rgba(0,0,0,0.6)', flexShrink: 0, zIndex: 1,
+            }}>
+              <div style={{ color: '#fff', fontSize: '0.85rem', opacity: 0.8 }}>
+                {fsIdx >= 0 ? `${fsIdx + 1} / ${currentList.length}` : ''}
+                {fsZoom !== null && fsNatural ? ` · ${Math.round(fsZoom * 100)}%` : ' · 自适应'}
+                <span style={{ marginLeft: 12, opacity: 0.6 }}>滚轮缩放 / 点击切换 / 拖拽平移 / 方向键切换</span>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" onClick={() => setFsZoom(null)}
+                  style={{ background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: '0.8rem' }}>
+                  自适应
+                </button>
+                <button type="button" onClick={() => setFsZoom(1)} disabled={!fsNatural}
+                  style={{ background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: '0.8rem' }}>
+                  100%
+                </button>
+                <button type="button" onClick={exitFullscreen}
+                  style={{ background: 'rgba(255,80,80,0.6)', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 14px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
+                  退出全屏 (ESC)
+                </button>
+              </div>
+            </div>
+
+            {/* Image area */}
+            <div
+              ref={(el) => {
+                (fsScrollRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+                (fsWheelRef as React.MutableRefObject<HTMLDivElement | null>).current = el
+              }}
+              style={{
+                flex: 1, overflow: isFit ? 'hidden' : 'auto', display: isFit ? 'flex' : 'block',
+                alignItems: 'center', justifyContent: 'center',
+                cursor: isFit ? 'zoom-in' : 'grab',
+              }}
+              onMouseDown={(e) => {
+                if (e.button !== 0 || isFit) return
+                const el = fsScrollRef.current
+                if (!el) return
+                fsDragState.current = { dragging: true, startX: e.clientX, startY: e.clientY, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop }
+                e.preventDefault()
+              }}
+              onMouseMove={(e) => {
+                const ds = fsDragState.current
+                if (!ds.dragging) return
+                const el = fsScrollRef.current
+                if (!el) return
+                el.scrollLeft = ds.scrollLeft - (e.clientX - ds.startX)
+                el.scrollTop = ds.scrollTop - (e.clientY - ds.startY)
+              }}
+              onMouseUp={() => { fsDragState.current.dragging = false }}
+              onMouseLeave={() => { fsDragState.current.dragging = false }}
+            >
+              <img
+                src={toFilePreviewSrc(fullscreenIssue.imagePath)}
+                alt={fullscreenIssue.imagePath}
+                draggable={false}
+                style={imgStyle}
+                onClick={(e) => {
+                  const ds = fsDragState.current
+                  const dx = Math.abs(e.clientX - ds.startX)
+                  const dy = Math.abs(e.clientY - ds.startY)
+                  if (dx < 5 && dy < 5) {
+                    setFsZoom((prev) => (prev === null ? 1 : null))
+                  }
+                }}
+                onLoad={(e) => {
+                  const img = e.currentTarget
+                  setFsNatural({ w: img.naturalWidth, h: img.naturalHeight })
+                }}
+              />
+            </div>
+
+            {/* Prev/Next arrows */}
+            {fsPrev && (
+              <button type="button"
+                onClick={() => { setFullscreenIssue(fsPrev); setFsZoom(null); setFsNatural(null) }}
+                style={{
+                  position: 'fixed', left: 16, top: '50%', transform: 'translateY(-50%)',
+                  background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', borderRadius: '50%',
+                  width: 48, height: 48, fontSize: 24, cursor: 'pointer', zIndex: 10001, display: 'grid', placeItems: 'center',
+                }}
+                aria-label="上一张">‹</button>
+            )}
+            {fsNext && (
+              <button type="button"
+                onClick={() => { setFullscreenIssue(fsNext); setFsZoom(null); setFsNatural(null) }}
+                style={{
+                  position: 'fixed', right: 16, top: '50%', transform: 'translateY(-50%)',
+                  background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', borderRadius: '50%',
+                  width: 48, height: 48, fontSize: 24, cursor: 'pointer', zIndex: 10001, display: 'grid', placeItems: 'center',
+                }}
+                aria-label="下一张">›</button>
+            )}
+
+            {/* Bottom filename */}
+            <div style={{
+              padding: '6px 16px', background: 'rgba(0,0,0,0.6)', flexShrink: 0,
+              color: 'rgba(255,255,255,0.6)', fontSize: '0.8rem', textAlign: 'center', wordBreak: 'break-all',
+            }}>
+              {fullscreenIssue.imagePath}
+              {fsNatural && <span style={{ marginLeft: 12 }}>{fsNatural.w} × {fsNatural.h} px</span>}
+            </div>
+          </div>
+        )
+      })()}
 
       <ConfirmDialog
         open={confirmOpen}
