@@ -1,0 +1,483 @@
+// Prevents additional console window on Windows in release, DO NOT REMOVE!!
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+use serde::Serialize;
+use std::fs;
+use std::path::Path;
+
+pub mod migrate;
+pub mod models;
+pub mod ops_log;
+pub mod parser;
+pub mod runtime_log;
+pub mod scanner;
+pub mod startup_diag;
+pub mod thumb_cache;
+
+use models::{ScanIssue, ScanResult};
+use ops_log::{
+    create_task, get_entry, get_task, list_tasks, save_task, update_task, ConflictPolicy, EntryStatus,
+    OperationEntry, TaskStatus,
+};
+use runtime_log::{append_runtime_log, list_runtime_logs, RuntimeLogLine};
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FixSummary {
+    task_id: String,
+    moved: usize,
+    deleted: usize,
+    skipped: usize,
+    entries: Vec<OperationEntry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CacheClearSummary {
+    removed: usize,
+    cache_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UndoSummary {
+    task_id: Option<String>,
+    entry_id: Option<String>,
+    undone: usize,
+    skipped: usize,
+    warnings: Vec<String>,
+}
+
+fn undo_entry_impl(entry: &mut OperationEntry) -> Result<bool, String> {
+    if entry.status == EntryStatus::Undone {
+        return Ok(false);
+    }
+
+    let source = Path::new(&entry.source);
+    let target = Path::new(&entry.target);
+
+    match entry.action.as_str() {
+        "move" => {
+            if !target.exists() {
+                entry.status = EntryStatus::Skipped;
+                entry.message = Some("无法找到该文件，请自行检查".to_string());
+                return Ok(false);
+            }
+
+            if let Some(parent) = source.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            fs::rename(target, source).map_err(|e| e.to_string())?;
+            entry.status = EntryStatus::Undone;
+            Ok(true)
+        }
+        "delete" => {
+            entry.status = EntryStatus::Skipped;
+            entry.message = Some("删除操作无法自动撤回，请自行检查".to_string());
+            Ok(false)
+        }
+        _ => {
+            entry.status = EntryStatus::Skipped;
+            entry.message = Some("未知操作类型，无法撤回".to_string());
+            Ok(false)
+        }
+    }
+}
+
+#[tauri::command]
+fn scan_vault(root: String, generate_thumbs: Option<bool>, thumb_size: Option<u32>) -> Result<ScanResult, String> {
+    let generate_thumbs = generate_thumbs.unwrap_or(true);
+    let thumb_size = thumb_size.unwrap_or(256);
+
+    append_runtime_log(
+        "info",
+        format!(
+            "scan_vault root={root} generate_thumbs={generate_thumbs} thumb_size={thumb_size}"
+        ),
+    );
+
+    scanner::scan_vault_with_thumbs(Path::new(&root), generate_thumbs, thumb_size).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn execute_migration(
+    note_path: String,
+    target_dir: String,
+    policy: Option<ConflictPolicy>,
+) -> Result<migrate::MigrateSummary, String> {
+    let policy = policy.unwrap_or_default();
+    append_runtime_log(
+        "info",
+        format!("execute_migration note={note_path} target={target_dir}"),
+    );
+
+    let summary = migrate::migrate_note_with_assets(Path::new(&note_path), Path::new(&target_dir), policy.clone())
+        .map_err(|e| e.to_string())?;
+
+    let mut task = create_task("migration", policy);
+    task.task_id = summary.task_id.clone();
+    task.entries = summary.entries.clone();
+    save_task(task);
+
+    Ok(summary)
+}
+
+#[tauri::command]
+fn fix_issues(issues: Vec<ScanIssue>, policy: Option<ConflictPolicy>) -> Result<FixSummary, String> {
+    let policy = policy.unwrap_or_default();
+    let mut task = create_task("fix", policy);
+
+    let mut moved = 0usize;
+    let mut deleted = 0usize;
+    let mut skipped = 0usize;
+
+    for issue in issues {
+        match issue.r#type.as_str() {
+            "misplaced" => {
+                let source = Path::new(&issue.image_path);
+                let Some(target_path) = issue.suggested_target.as_deref() else {
+                    skipped += 1;
+                    continue;
+                };
+                let target = Path::new(target_path);
+
+                if !source.exists() {
+                    skipped += 1;
+                    task.entries.push(OperationEntry {
+                        entry_id: ops_log::next_id("entry"),
+                        file_path: issue.image_path.clone(),
+                        action: "move".to_string(),
+                        source: issue.image_path.clone(),
+                        target: target_path.to_string(),
+                        status: EntryStatus::Skipped,
+                        message: Some("无法找到该文件，请自行检查".to_string()),
+                    });
+                    continue;
+                }
+
+                if issue.reason.contains("trash") {
+                    if issue.suggested_target.as_deref() == Some("__DELETE__") {
+                        fs::remove_file(source).map_err(|e| e.to_string())?;
+                        deleted += 1;
+                        task.entries.push(OperationEntry {
+                            entry_id: ops_log::next_id("entry"),
+                            file_path: issue.image_path.clone(),
+                            action: "delete".to_string(),
+                            source: issue.image_path.clone(),
+                            target: issue.image_path.clone(),
+                            status: EntryStatus::Applied,
+                            message: Some("trash 引用：按选择执行删除".to_string()),
+                        });
+                        continue;
+                    }
+                }
+
+                if target.exists() {
+                    match task.policy {
+                        ConflictPolicy::OverwriteAll => {
+                            if target.is_file() {
+                                fs::remove_file(target).map_err(|e| e.to_string())?;
+                            }
+                        }
+                        ConflictPolicy::RenameAll => {
+                            let mut i = 1usize;
+                            let mut candidate = target.to_path_buf();
+                            while candidate.exists() {
+                                let stem = target
+                                    .file_stem()
+                                    .and_then(|s| s.to_str())
+                                    .unwrap_or("file");
+                                let ext = target.extension().and_then(|s| s.to_str()).unwrap_or("");
+                                let parent = target.parent().unwrap_or(Path::new("."));
+                                let name = if ext.is_empty() {
+                                    format!("{stem} ({i})")
+                                } else {
+                                    format!("{stem} ({i}).{ext}")
+                                };
+                                candidate = parent.join(name);
+                                i += 1;
+                            }
+                            if let Some(parent) = candidate.parent() {
+                                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                            }
+                            fs::rename(source, &candidate).map_err(|e| e.to_string())?;
+                            moved += 1;
+                            task.entries.push(OperationEntry {
+                                entry_id: ops_log::next_id("entry"),
+                                file_path: issue.image_path.clone(),
+                                action: "move".to_string(),
+                                source: issue.image_path.clone(),
+                                target: candidate.to_string_lossy().to_string(),
+                                status: EntryStatus::Applied,
+                                message: None,
+                            });
+                            continue;
+                        }
+                        ConflictPolicy::PromptEach => {
+                            skipped += 1;
+                            task.entries.push(OperationEntry {
+                                entry_id: ops_log::next_id("entry"),
+                                file_path: issue.image_path.clone(),
+                                action: "move".to_string(),
+                                source: issue.image_path.clone(),
+                                target: target_path.to_string(),
+                                status: EntryStatus::Skipped,
+                                message: Some("冲突：请在前端选择处理方式".to_string()),
+                            });
+                            continue;
+                        }
+                    }
+                }
+
+                if let Some(parent) = target.parent() {
+                    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+                fs::rename(source, target).map_err(|e| e.to_string())?;
+                moved += 1;
+                task.entries.push(OperationEntry {
+                    entry_id: ops_log::next_id("entry"),
+                    file_path: issue.image_path.clone(),
+                    action: "move".to_string(),
+                    source: issue.image_path.clone(),
+                    target: target_path.to_string(),
+                    status: EntryStatus::Applied,
+                    message: None,
+                });
+            }
+            "orphan" => {
+                let source = Path::new(&issue.image_path);
+                if !source.exists() {
+                    skipped += 1;
+                    task.entries.push(OperationEntry {
+                        entry_id: ops_log::next_id("entry"),
+                        file_path: issue.image_path.clone(),
+                        action: "delete".to_string(),
+                        source: issue.image_path.clone(),
+                        target: issue.image_path.clone(),
+                        status: EntryStatus::Skipped,
+                        message: Some("无法找到该文件，请自行检查".to_string()),
+                    });
+                    continue;
+                }
+                fs::remove_file(source).map_err(|e| e.to_string())?;
+                deleted += 1;
+                task.entries.push(OperationEntry {
+                    entry_id: ops_log::next_id("entry"),
+                    file_path: issue.image_path.clone(),
+                    action: "delete".to_string(),
+                    source: issue.image_path.clone(),
+                    target: issue.image_path.clone(),
+                    status: EntryStatus::Applied,
+                    message: None,
+                });
+            }
+            _ => skipped += 1,
+        }
+    }
+
+    task.status = TaskStatus::Applied;
+    save_task(task.clone());
+
+    append_runtime_log(
+        "info",
+        format!("fix_issues done moved={moved} deleted={deleted} skipped={skipped}"),
+    );
+
+    Ok(FixSummary {
+        task_id: task.task_id,
+        moved,
+        deleted,
+        skipped,
+        entries: task.entries,
+    })
+}
+
+#[tauri::command]
+fn list_operation_history() -> Vec<ops_log::OperationTask> {
+    list_tasks()
+}
+
+#[tauri::command]
+fn undo_entry(entry_id: String) -> Result<UndoSummary, String> {
+    let Some((mut task, _entry_snapshot)) = get_entry(&entry_id) else {
+        return Ok(UndoSummary {
+            task_id: None,
+            entry_id: Some(entry_id),
+            undone: 0,
+            skipped: 1,
+            warnings: vec!["无法找到该文件，请自行检查".to_string()],
+        });
+    };
+
+    let mut undone = 0usize;
+    let mut skipped = 0usize;
+    let mut warnings = Vec::new();
+
+    for entry in &mut task.entries {
+        if entry.entry_id == entry_id {
+            match undo_entry_impl(entry)? {
+                true => undone += 1,
+                false => {
+                    skipped += 1;
+                    if let Some(msg) = &entry.message {
+                        warnings.push(msg.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    task.status = if task.entries.iter().all(|e| e.status == EntryStatus::Undone) {
+        TaskStatus::Undone
+    } else {
+        TaskStatus::PartiallyUndone
+    };
+    update_task(task.clone());
+
+    Ok(UndoSummary {
+        task_id: Some(task.task_id),
+        entry_id: Some(entry_id),
+        undone,
+        skipped,
+        warnings,
+    })
+}
+
+#[tauri::command]
+fn undo_task(task_id: String) -> Result<UndoSummary, String> {
+    let Some(mut task) = get_task(&task_id) else {
+        return Ok(UndoSummary {
+            task_id: Some(task_id),
+            entry_id: None,
+            undone: 0,
+            skipped: 1,
+            warnings: vec!["无法找到该文件，请自行检查".to_string()],
+        });
+    };
+
+    let mut undone = 0usize;
+    let mut skipped = 0usize;
+    let mut warnings = Vec::new();
+
+    for entry in task.entries.iter_mut().rev() {
+        if entry.status == EntryStatus::Undone {
+            skipped += 1;
+            continue;
+        }
+
+        match undo_entry_impl(entry)? {
+            true => undone += 1,
+            false => {
+                skipped += 1;
+                if let Some(msg) = &entry.message {
+                    warnings.push(msg.clone());
+                }
+            }
+        }
+    }
+
+    task.status = if task.entries.iter().all(|e| e.status == EntryStatus::Undone) {
+        TaskStatus::Undone
+    } else {
+        TaskStatus::PartiallyUndone
+    };
+    update_task(task.clone());
+
+    Ok(UndoSummary {
+        task_id: Some(task_id),
+        entry_id: None,
+        undone,
+        skipped,
+        warnings,
+    })
+}
+
+#[tauri::command]
+fn open_file(path: String) -> Result<(), String> {
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Err("无法找到该文件，请自行检查".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn open_file_parent(path: String) -> Result<(), String> {
+    let p = Path::new(&path);
+    let Some(parent) = p.parent() else {
+        return Err("无法找到该文件，请自行检查".to_string());
+    };
+    if !parent.exists() {
+        return Err("无法找到该文件，请自行检查".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(parent)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(parent)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn get_runtime_logs(limit: Option<usize>) -> Vec<RuntimeLogLine> {
+    list_runtime_logs(limit.unwrap_or(200))
+}
+
+#[tauri::command]
+fn clear_thumbnail_cache() -> Result<CacheClearSummary, String> {
+    let removed = thumb_cache::clear_cache().map_err(|e| e.to_string())?;
+    let cache_dir = thumb_cache::cache_root_path_string();
+    append_runtime_log("info", format!("clear_thumbnail_cache removed={removed} cache_dir={cache_dir}"));
+    Ok(CacheClearSummary { removed, cache_dir: cache_dir })
+}
+
+fn main() {
+    let startup_report = startup_diag::collect_startup_report();
+    startup_diag::write_startup_report(&startup_report);
+    append_runtime_log("info", "application startup");
+
+    tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            scan_vault,
+            clear_thumbnail_cache,
+            execute_migration,
+            fix_issues,
+            list_operation_history,
+            undo_entry,
+            undo_task,
+            open_file,
+            open_file_parent,
+            get_runtime_logs
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
