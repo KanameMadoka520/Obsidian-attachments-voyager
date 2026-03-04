@@ -63,6 +63,11 @@ function toThumbPreviewSrc(path?: string) {
   return toFilePreviewSrc(path)
 }
 
+function getThumbSrc(issue: AuditIssue, size: 'tiny' | 'small' | 'medium'): string {
+  const path = issue.thumbnailPaths?.[size] ?? (size === 'small' ? issue.thumbnailPath : undefined)
+  return path ? toFilePreviewSrc(path) : ''
+}
+
 function ScanPage({ conflictPolicy }: ScanPageProps) {
   const [vaultPath, setVaultPath] = useState('')
   const [recentVaults, setRecentVaults] = useState<string[]>(() => loadRecentVaults())
@@ -476,11 +481,11 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                               boxSizing: 'border-box',
                             }}
                           >
-                            {issue.thumbnailPath ? '缩略图加载失败' : '未生成缩略图'}
+                            {(issue.thumbnailPaths || issue.thumbnailPath) ? '缩略图加载失败' : '未生成缩略图'}
                           </div>
-                          {issue.thumbnailPath && (
+                          {(issue.thumbnailPaths || issue.thumbnailPath) && (
                             <img
-                              src={toThumbPreviewSrc(issue.thumbnailPath)}
+                              src={getThumbSrc(issue, 'small')}
                               alt={issue.imagePath}
                               loading="lazy"
                               onLoad={(e) => {
@@ -588,9 +593,9 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
           >
             <div style={{ marginBottom: 16, textAlign: 'center' }}>
               <div style={{ position: 'relative', width: '100%', maxHeight: 300, borderRadius: 8, overflow: 'hidden', background: '#1111', marginBottom: 12 }}>
-                {displayMode === 'thumbnail' && galleryActionIssue.thumbnailPath ? (
+                {displayMode === 'thumbnail' && (galleryActionIssue.thumbnailPaths || galleryActionIssue.thumbnailPath) ? (
                   <img
-                    src={toThumbPreviewSrc(galleryActionIssue.thumbnailPath)}
+                    src={getThumbSrc(galleryActionIssue, 'medium') || getThumbSrc(galleryActionIssue, 'small')}
                     alt={galleryActionIssue.imagePath}
                     style={{ width: '100%', maxHeight: 300, objectFit: 'contain' }}
                   />

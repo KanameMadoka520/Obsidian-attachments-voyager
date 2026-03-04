@@ -6,29 +6,28 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub fn scan_vault_with_thumbs(root: &Path, generate_thumbs: bool, thumb_size: u32) -> Result<ScanResult> {
+pub fn scan_vault_with_thumbs(root: &Path, generate_thumbs: bool, _thumb_size: u32) -> Result<ScanResult> {
     let mut result = scan_vault(root)?;
 
     if !generate_thumbs {
         return Ok(result);
     }
 
-    let mut by_image_path: HashMap<String, Option<String>> = HashMap::new();
+    let mut by_image_path: HashMap<String, Option<thumb_cache::MultiThumbnailResult>> = HashMap::new();
 
     for issue in result.issues.iter() {
         if by_image_path.contains_key(&issue.image_path) {
             continue;
         }
 
-        let thumb = thumb_cache::generate_thumbnail(&issue.image_path, thumb_size)
-            .ok()
-            .map(|gen| gen.thumbnail_path);
-        by_image_path.insert(issue.image_path.clone(), thumb);
+        let multi = thumb_cache::generate_thumbnail_multi(&issue.image_path, thumb_cache::SIZES).ok();
+        by_image_path.insert(issue.image_path.clone(), multi);
     }
 
     for issue in result.issues.iter_mut() {
-        if let Some(p) = by_image_path.get(&issue.image_path) {
-            issue.thumbnail_path = p.clone();
+        if let Some(Some(multi)) = by_image_path.get(&issue.image_path) {
+            issue.thumbnail_path = multi.thumbnail_paths.get("small").cloned();
+            issue.thumbnail_paths = Some(multi.thumbnail_paths.clone());
         }
     }
 
@@ -74,6 +73,7 @@ pub fn scan_vault(root: &Path) -> Result<ScanResult> {
                     reason: "image exists under attachments but is not referenced".to_string(),
                     suggested_target: None,
                     thumbnail_path: None,
+                    thumbnail_paths: None,
                 });
             }
         }
@@ -101,6 +101,7 @@ pub fn scan_vault(root: &Path) -> Result<ScanResult> {
                         reason,
                         suggested_target: Some(expected.to_string_lossy().to_string()),
                         thumbnail_path: None,
+                        thumbnail_paths: None,
                     });
                 }
             }
