@@ -3,11 +3,11 @@ import { open } from '@tauri-apps/api/dialog'
 import { invoke, convertFileSrc } from '@tauri-apps/api/tauri'
 import { appWindow } from '@tauri-apps/api/window'
 import ConfirmDialog from '../components/ConfirmDialog'
-import IssuesTable from '../components/IssuesTable'
-import OperationHistoryPanel from '../components/OperationHistoryPanel'
-import StatsCards from '../components/StatsCards'
+import DetailPanel from '../components/DetailPanel'
+import Sidebar from '../components/Sidebar'
+import StatusBar from '../components/StatusBar'
+import Toolbar from '../components/Toolbar'
 import VirtualGallery from '../components/VirtualGallery'
-import WorkLogPanel from '../components/WorkLogPanel'
 import type { AuditIssue, ConflictPolicy, GalleryDisplayMode, OperationTask, RuntimeLogLine, ScanResult } from '../types'
 import { scanVault } from '../lib/commands'
 
@@ -109,7 +109,8 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
   const [selectedIssueIds, setSelectedIssueIds] = useState<string[]>([])
   const [anchorIndex, setAnchorIndex] = useState<number | null>(null)
   const [galleryTab, setGalleryTab] = useState<'orphan' | 'misplaced'>('orphan')
-  const [listTab, setListTab] = useState<'orphan' | 'misplaced'>('orphan')
+  const [searchText, setSearchText] = useState('')
+  const [focusedIssue, setFocusedIssue] = useState<AuditIssue | null>(null)
   const [trashDeleteIds, setTrashDeleteIds] = useState<string[]>([])
   const [generateThumbs, setGenerateThumbs] = useState(true)
   const [displayMode, setDisplayMode] = useState<GalleryDisplayMode>(() => loadDisplayMode())
@@ -213,7 +214,10 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
     localStorage.setItem(DISPLAY_MODE_KEY, mode)
   }
 
-  const issues = result?.issues ?? []
+  const allIssues = result?.issues ?? []
+  const issues = searchText
+    ? allIssues.filter((i) => i.imagePath.toLowerCase().includes(searchText.toLowerCase()))
+    : allIssues
   const orphanIssues = issues.filter((i) => i.type === 'orphan')
   const misplacedIssues = issues.filter((i) => i.type === 'misplaced')
 
@@ -285,6 +289,8 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
     index: number,
     event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }
   ) => {
+    const clicked = issues.find((i) => i.id === issueId) ?? null
+    setFocusedIssue(clicked)
     setSelectedIssueIds((prev) => {
       const hasIssue = prev.includes(issueId)
 
@@ -411,211 +417,84 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
     }
   }
 
+  const currentGalleryIssues = galleryTab === 'orphan' ? orphanIssues : misplacedIssues
+
   return (
-    <div className="page-wrapper">
-      <section className="card">
-        <h2 className="card-title">仓库配置</h2>
-        <div className="input-group">
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-muted)' }}>
-            <input
-              type="checkbox"
-              checked={generateThumbs}
-              disabled={loading || fixing}
-              onChange={(e) => setGenerateThumbs(e.target.checked)}
-            />
-            生成画廊缩略图（64 / 256 / 1024px 三级缩略图，会降低扫描速度）
-          </label>
+    <div className="scan-layout">
+      <Toolbar
+        vaultPath={vaultPath}
+        onVaultPathChange={setVaultPath}
+        recentVaults={recentVaults}
+        onPickDirectory={pickDirectory}
+        onScan={runScan}
+        scanning={loading}
+        fixing={fixing}
+        displayMode={displayMode}
+        onDisplayModeChange={changeDisplayMode}
+        hasResult={!!result}
+        selectedCount={selectedIssueIds.length}
+        totalCount={issues.length}
+        onSelectAll={selectAllIssues}
+        onClearSelection={clearSelectedIssues}
+        onFix={() => setConfirmOpen(true)}
+        generateThumbs={generateThumbs}
+        onGenerateThumbsChange={setGenerateThumbs}
+      />
 
-          <label htmlFor="vault-path" className="input-label">仓库路径</label>
-          <input
-            id="vault-path"
-            className="input-field"
-            list="recent-vaults"
-            value={vaultPath}
-            onChange={(e) => setVaultPath(e.target.value)}
-            placeholder="选择或输入 Obsidian 仓库路径..."
-          />
-          <datalist id="recent-vaults">
-            {recentVaults.map((p) => (
-              <option key={p} value={p} />
-            ))}
-          </datalist>
-          <button type="button" className="btn btn-secondary" onClick={pickDirectory}>
-            选择目录
-          </button>
-          <button type="button" className="btn btn-primary" onClick={runScan} disabled={loading || fixing}>
-            {loading ? '扫描中...' : '开始扫描'}
-          </button>
+      {error && (
+        <div style={{ padding: '4px 12px', fontSize: '0.78rem' }}>
+          <div className={error.includes('完成') ? 'alert alert-success' : 'alert alert-error'} role="alert" style={{ margin: 0 }}>{error}</div>
         </div>
-        {error && <div className={error.includes('完成') ? 'alert alert-success' : 'alert alert-error'} role="alert">{error}</div>}
-      </section>
-
-      <section className="card">
-        <h2 className="card-title">工作原理说明（附件扫描）</h2>
-        <p style={{ color: 'var(--text-muted)' }}>
-          扫描会遍历仓库中的 Markdown 与 attachments 目录，识别未引用图片（orphan）和错位图片（misplaced），并可执行自动修复。
-        </p>
-      </section>
-
-      <section className="card">
-        <h2 className="card-title">执行修复说明</h2>
-        <ul style={{ color: 'var(--text-muted)', paddingLeft: 18 }}>
-          <li><strong>orphan</strong>：删除未被任何笔记引用的附件文件（删除后通常不可自动恢复）。</li>
-          <li><strong>misplaced</strong>：将附件移动到建议目标路径；遇到重名按冲突策略处理（默认改名共存）。</li>
-          <li>执行修复仅会处理你当前选中的项目。</li>
-          <li><strong>执行前请先备份仓库</strong>，尤其是批量删除或批量迁移时。</li>
-        </ul>
-      </section>
-
-      <StatsCards result={result} />
+      )}
 
       {resultIsStale && result && (
-        <div style={{ margin: '12px 0', padding: '10px 16px', background: 'rgba(255, 180, 0, 0.15)', border: '1px solid rgba(255, 180, 0, 0.4)', borderRadius: 6, fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-          当前展示的是上次的扫描结果。如果仓库内容已发生变化，建议点击"开始扫描"重新扫描。
+        <div style={{ padding: '4px 12px', fontSize: '0.78rem', background: 'rgba(255, 180, 0, 0.1)', color: 'var(--text-muted)', borderBottom: '1px solid rgba(255, 180, 0, 0.3)' }}>
+          当前展示的是上次的扫描结果。如果仓库内容已发生变化，建议重新扫描。
         </div>
       )}
 
-      {result && (
-        <>
-          <section className="card" style={{ marginBottom: 12 }}>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <button type="button" className="btn btn-secondary" onClick={selectAllIssues}>全选</button>
-              <button type="button" className="btn btn-secondary" onClick={clearSelectedIssues}>清空选择</button>
-              <button type="button" className="btn btn-danger" onClick={() => setConfirmOpen(true)} disabled={fixing}>
-                执行修复
-              </button>
-              <span style={{ color: 'var(--text-muted)' }}>已选择 {selectedIssueIds.length} / {issues.length}</span>
-              <span style={{ color: 'var(--text-muted)' }}>支持：普通点击单选、Ctrl 切换、Shift 区间选择</span>
-            </div>
-          </section>
+      <div className="scan-panels">
+        <Sidebar
+          category={galleryTab}
+          onCategoryChange={setGalleryTab}
+          orphanCount={orphanIssues.length}
+          misplacedCount={misplacedIssues.length}
+          searchText={searchText}
+          onSearchChange={setSearchText}
+        />
 
-          <section className="card">
-            <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className={`btn ${galleryTab === 'orphan' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setGalleryTab('orphan')}
-              >
-                Orphan 画廊 ({orphanIssues.length})
-              </button>
-              <button
-                type="button"
-                className={`btn ${galleryTab === 'misplaced' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setGalleryTab('misplaced')}
-              >
-                Misplaced 画廊 ({misplacedIssues.length})
-              </button>
+        <main className="scan-gallery">
+          <VirtualGallery
+            issues={currentGalleryIssues}
+            displayMode={displayMode}
+            selectedIssueIds={selectedIssueIds}
+            issueIndexMap={issueIndexMap}
+            toFilePreviewSrc={toFilePreviewSrc}
+            getThumbSrc={getThumbSrc}
+            onIssueClick={handleIssueRowClick}
+            onPreviewClick={setGalleryActionIssue}
+          />
+        </main>
 
-              <button type="button" className="btn btn-secondary" onClick={clearThumbnailCache}>
-                清除缩略图缓存
-              </button>
-            </div>
+        <DetailPanel
+          issue={focusedIssue}
+          selectedCount={selectedIssueIds.length}
+          toFilePreviewSrc={toFilePreviewSrc}
+          getThumbSrc={getThumbSrc}
+          onOpenFile={handleOpenFile}
+          onOpenFolder={handleOpenFolder}
+          onFullscreen={enterFullscreen}
+        />
+      </div>
 
-            <div style={{
-              marginBottom: 12, padding: '10px 14px',
-              background: 'var(--panel-bg)', border: '1px solid var(--border-color)',
-              borderRadius: 8,
-            }}>
-              <div style={{ display: 'flex', gap: 0, marginBottom: 8 }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 600, marginRight: 12, lineHeight: '32px' }}>画廊显示模式：</span>
-                {([
-                  { value: 'thumbnail' as const, label: '缩略图' },
-                  { value: 'rawImage' as const, label: '原图直显' },
-                  { value: 'noImage' as const, label: '不显示图片' },
-                ] as const).map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => changeDisplayMode(opt.value)}
-                    style={{
-                      padding: '4px 16px', fontSize: '0.85rem', cursor: 'pointer',
-                      border: '1px solid var(--border-color)',
-                      borderRight: opt.value === 'noImage' ? '1px solid var(--border-color)' : 'none',
-                      borderRadius: opt.value === 'thumbnail' ? '6px 0 0 6px' : opt.value === 'noImage' ? '0 6px 6px 0' : '0',
-                      background: displayMode === opt.value ? 'var(--accent, #7b61ff)' : 'transparent',
-                      color: displayMode === opt.value ? '#fff' : 'inherit',
-                      fontWeight: displayMode === opt.value ? 600 : 400,
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                {displayMode === 'thumbnail' && '使用缩略图加载画廊和预览弹窗，性能最佳。点击放大查看时显示的是中等缩略图（1024px），非原始分辨率。'}
-                {displayMode === 'rawImage' && '⚠ 画廊和预览弹窗均直接加载原图，可获得最高清晰度，但大量高分辨率图片可能导致内存占用增大和界面卡顿。'}
-                {displayMode === 'noImage' && '画廊不加载任何图片，仅显示文件名，适合快速浏览文件列表。点击放大查看时仍可看到原图。'}
-              </div>
-            </div>
-
-            <VirtualGallery
-              issues={galleryTab === 'orphan' ? orphanIssues : misplacedIssues}
-              displayMode={displayMode}
-              selectedIssueIds={selectedIssueIds}
-              issueIndexMap={issueIndexMap}
-              toFilePreviewSrc={toFilePreviewSrc}
-              getThumbSrc={getThumbSrc}
-              onIssueClick={handleIssueRowClick}
-              onPreviewClick={setGalleryActionIssue}
-            />
-          </section>
-
-          <div className="results-wrapper">
-            <section className="card">
-              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                <button
-                  type="button"
-                  className={`btn ${listTab === 'orphan' ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setListTab('orphan')}
-                >
-                  Orphan 问题列表 ({orphanIssues.length})
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${listTab === 'misplaced' ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setListTab('misplaced')}
-                >
-                  Misplaced 问题列表 ({misplacedIssues.length})
-                </button>
-              </div>
-
-              {listTab === 'orphan' ? (
-                <IssuesTable
-                  title="Orphan 问题列表"
-                  mode="orphan"
-                  issues={orphanIssues}
-                  onOpenFile={handleOpenFile}
-                  onOpenFolder={handleOpenFolder}
-                  selectedIssueIds={selectedIssueIds}
-                  onIssueRowClick={handleIssueRowClick}
-                  indexOfIssue={(id) => issueIndexMap.get(id) ?? -1}
-                  trashDeleteIds={trashDeleteIds}
-                  onToggleTrashDelete={toggleTrashDelete}
-                  toFilePreviewSrc={generateThumbs ? toFilePreviewSrc : undefined}
-                  onPreviewClick={setGalleryActionIssue}
-                />
-              ) : (
-                <IssuesTable
-                  title="Misplaced 问题列表"
-                  mode="misplaced"
-                  issues={misplacedIssues}
-                  onOpenFile={handleOpenFile}
-                  onOpenFolder={handleOpenFolder}
-                  onOpenMarkdownFile={handleOpenFile}
-                  onOpenMarkdownFolder={handleOpenFolder}
-                  selectedIssueIds={selectedIssueIds}
-                  onIssueRowClick={handleIssueRowClick}
-                  indexOfIssue={(id) => issueIndexMap.get(id) ?? -1}
-                  trashDeleteIds={trashDeleteIds}
-                  onToggleTrashDelete={toggleTrashDelete}
-                  toFilePreviewSrc={generateThumbs ? toFilePreviewSrc : undefined}
-                  onPreviewClick={setGalleryActionIssue}
-                />
-              )}
-            </section>
-          </div>
-        </>
-      )}
+      <StatusBar
+        orphanCount={orphanIssues.length}
+        misplacedCount={misplacedIssues.length}
+        selectedCount={selectedIssueIds.length}
+        totalCount={issues.length}
+        logs={logs}
+        scanning={loading}
+      />
 
       {galleryActionIssue && (() => {
         const currentList = galleryTab === 'orphan' ? orphanIssues : misplacedIssues
@@ -821,9 +700,6 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
           </div>
         )
       })()}
-
-      <WorkLogPanel logs={logs} />
-      <OperationHistoryPanel tasks={tasks} onUndoTask={handleUndoTask} onUndoEntry={handleUndoEntry} />
 
       {fullscreenIssue && (() => {
         const currentList = galleryTab === 'orphan' ? orphanIssues : misplacedIssues
