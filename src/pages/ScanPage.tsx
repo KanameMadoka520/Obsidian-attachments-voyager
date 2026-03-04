@@ -420,10 +420,14 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                           src={toThumbPreviewSrc(issue.thumbnailPath)}
                           alt={issue.imagePath}
                           loading="lazy"
+                          onLoad={(e) => {
+                            const placeholder = (e.currentTarget as HTMLImageElement).previousElementSibling as HTMLElement | null
+                            if (placeholder) placeholder.style.display = 'none'
+                          }}
                           onError={(e) => {
                             ;(e.currentTarget as HTMLImageElement).style.display = 'none'
                           }}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
+                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
                         />
                       )}
                     </div>
