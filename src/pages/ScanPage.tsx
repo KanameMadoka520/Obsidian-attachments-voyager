@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { open } from '@tauri-apps/api/dialog'
 import { invoke, convertFileSrc } from '@tauri-apps/api/tauri'
+import { appWindow } from '@tauri-apps/api/window'
 import ConfirmDialog from '../components/ConfirmDialog'
 import IssuesTable from '../components/IssuesTable'
 import OperationHistoryPanel from '../components/OperationHistoryPanel'
@@ -27,6 +28,8 @@ interface ScanPageProps {
 
 const RECENT_VAULTS_KEY = 'voyager-recent-vaults-v1'
 const DISPLAY_MODE_KEY = 'voyager-display-mode-v1'
+const LAST_VAULT_KEY = 'voyager-last-vault-v1'
+const CACHED_RESULT_KEY = 'voyager-cached-scan-result-v1'
 
 function loadDisplayMode(): GalleryDisplayMode {
   const raw = localStorage.getItem(DISPLAY_MODE_KEY)
@@ -52,6 +55,29 @@ function saveRecentVault(path: string) {
   const current = loadRecentVaults()
   const next = [normalized, ...current.filter((p) => p !== normalized)].slice(0, 8)
   localStorage.setItem(RECENT_VAULTS_KEY, JSON.stringify(next))
+  localStorage.setItem(LAST_VAULT_KEY, normalized)
+}
+
+function loadLastVault(): string {
+  return localStorage.getItem(LAST_VAULT_KEY) ?? ''
+}
+
+function loadCachedResult(): ScanResult | undefined {
+  try {
+    const raw = localStorage.getItem(CACHED_RESULT_KEY)
+    if (!raw) return undefined
+    return JSON.parse(raw) as ScanResult
+  } catch {
+    return undefined
+  }
+}
+
+function saveCachedResult(result: ScanResult | undefined) {
+  if (!result) {
+    localStorage.removeItem(CACHED_RESULT_KEY)
+  } else {
+    localStorage.setItem(CACHED_RESULT_KEY, JSON.stringify(result))
+  }
 }
 
 function toFilePreviewSrc(path: string) {
@@ -70,9 +96,10 @@ function getThumbSrc(issue: AuditIssue, size: 'tiny' | 'small' | 'medium'): stri
 }
 
 function ScanPage({ conflictPolicy }: ScanPageProps) {
-  const [vaultPath, setVaultPath] = useState('')
+  const [vaultPath, setVaultPath] = useState(() => loadLastVault())
   const [recentVaults, setRecentVaults] = useState<string[]>(() => loadRecentVaults())
-  const [result, setResult] = useState<ScanResult | undefined>(undefined)
+  const [result, setResult] = useState<ScanResult | undefined>(() => loadCachedResult())
+  const [resultIsStale, setResultIsStale] = useState(() => loadCachedResult() !== undefined)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -197,6 +224,8 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
     try {
       const scanResult = await scanVault(vaultPath, { generateThumbs, thumbSize: 256 })
       setResult(scanResult)
+      saveCachedResult(scanResult)
+      setResultIsStale(false)
       setSelectedIssueIds([])
       setAnchorIndex(null)
       setTrashDeleteIds([])
@@ -205,6 +234,7 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
       await refreshOps()
     } catch (e) {
       setResult(undefined)
+      saveCachedResult(undefined)
       setError(e instanceof Error ? e.message : '扫描失败')
     } finally {
       setLoading(false)
@@ -400,6 +430,12 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
 
       <StatsCards result={result} />
 
+      {resultIsStale && result && (
+        <div style={{ margin: '12px 0', padding: '10px 16px', background: 'rgba(255, 180, 0, 0.15)', border: '1px solid rgba(255, 180, 0, 0.4)', borderRadius: 6, fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+          当前展示的是上次的扫描结果。如果仓库内容已发生变化，建议点击"开始扫描"重新扫描。
+        </div>
+      )}
+
       {result && (
         <>
           <section className="card" style={{ marginBottom: 12 }}>
@@ -498,6 +534,7 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                   trashDeleteIds={trashDeleteIds}
                   onToggleTrashDelete={toggleTrashDelete}
                   toFilePreviewSrc={generateThumbs ? toFilePreviewSrc : undefined}
+                  onPreviewClick={setGalleryActionIssue}
                 />
               ) : (
                 <IssuesTable
@@ -514,6 +551,7 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                   trashDeleteIds={trashDeleteIds}
                   onToggleTrashDelete={toggleTrashDelete}
                   toFilePreviewSrc={generateThumbs ? toFilePreviewSrc : undefined}
+                  onPreviewClick={setGalleryActionIssue}
                 />
               )}
             </section>
@@ -695,7 +733,9 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                   type="button"
                   className="btn btn-secondary"
                   onClick={() => {
-                    document.documentElement.requestFullscreen?.().catch(() => {})
+                    appWindow.isFullscreen().then((isFull) => {
+                      appWindow.setFullscreen(!isFull)
+                    }).catch(() => {})
                   }}
                 >
                   全屏原图
