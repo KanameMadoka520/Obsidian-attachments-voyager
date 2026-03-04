@@ -8,6 +8,7 @@ export interface AuditIssue {
   reason: string
   suggestedTarget?: string
   thumbnailPath?: string
+  thumbnailPaths?: { tiny?: string; small?: string; medium?: string }
 }
 
 export interface ScanResult {
