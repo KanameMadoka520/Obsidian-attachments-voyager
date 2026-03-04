@@ -87,6 +87,8 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
   const [generateThumbs, setGenerateThumbs] = useState(true)
   const [displayMode, setDisplayMode] = useState<GalleryDisplayMode>(() => loadDisplayMode())
   const [galleryActionIssue, setGalleryActionIssue] = useState<AuditIssue | null>(null)
+  const [previewZoom, setPreviewZoom] = useState(1)
+  const [previewFullscreen, setPreviewFullscreen] = useState(false)
 
   const changeDisplayMode = (mode: GalleryDisplayMode) => {
     setDisplayMode(mode)
@@ -472,8 +474,8 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
         const currentIdx = currentList.findIndex((i) => i.id === galleryActionIssue.id)
         const hasPrev = currentIdx > 0
         const hasNext = currentIdx < currentList.length - 1
-        const goPrev = () => { if (hasPrev) setGalleryActionIssue(currentList[currentIdx - 1]) }
-        const goNext = () => { if (hasNext) setGalleryActionIssue(currentList[currentIdx + 1]) }
+        const goPrev = () => { if (hasPrev) { setGalleryActionIssue(currentList[currentIdx - 1]); setPreviewZoom(1); setPreviewFullscreen(false) } }
+        const goNext = () => { if (hasNext) { setGalleryActionIssue(currentList[currentIdx + 1]); setPreviewZoom(1); setPreviewFullscreen(false) } }
 
         return (
           <div
@@ -522,77 +524,131 @@ function ScanPage({ conflictPolicy }: ScanPageProps) {
                 ›
               </button>
             )}
-            <div
-              style={{
-                background: 'var(--panel-bg, #fff)',
-                borderRadius: 12,
-                padding: 24,
-                minWidth: 320,
-                maxWidth: '90vw',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div style={{ marginBottom: 8, textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                {currentIdx + 1} / {currentList.length}
-              </div>
-              <div style={{ marginBottom: 16, textAlign: 'center' }}>
-                <div style={{ position: 'relative', width: '100%', maxHeight: 300, borderRadius: 8, overflow: 'hidden', background: '#1111', marginBottom: 12 }}>
-                  {displayMode === 'thumbnail' && (galleryActionIssue.thumbnailPaths || galleryActionIssue.thumbnailPath) ? (
-                    <img
-                      src={getThumbSrc(galleryActionIssue, 'medium') || getThumbSrc(galleryActionIssue, 'small')}
-                      alt={galleryActionIssue.imagePath}
-                      style={{ width: '100%', maxHeight: 300, objectFit: 'contain' }}
-                    />
-                  ) : (
-                    <img
-                      src={toFilePreviewSrc(galleryActionIssue.imagePath)}
-                      alt={galleryActionIssue.imagePath}
-                      style={{ width: '100%', maxHeight: 300, objectFit: 'contain' }}
-                      onError={(e) => {
-                        ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-                        const fallback = document.createElement('div')
-                        fallback.textContent = '无法加载图片'
-                        fallback.style.cssText = 'padding:24px;color:var(--text-muted);text-align:center'
-                        ;(e.currentTarget as HTMLImageElement).parentElement?.appendChild(fallback)
-                      }}
-                    />
-                  )}
+            {previewFullscreen ? (
+              <div
+                style={{
+                  position: 'fixed', inset: 0, zIndex: 1002, background: 'rgba(0,0,0,0.92)',
+                  overflow: 'auto', cursor: 'grab',
+                }}
+                onClick={(e) => { e.stopPropagation(); setPreviewFullscreen(false) }}
+              >
+                <div style={{ position: 'fixed', top: 12, right: 12, zIndex: 1003, display: 'flex', gap: 8 }}>
+                  <span style={{ color: '#fff', fontSize: '0.85rem', lineHeight: '32px' }}>100% 原图 — 点击任意处关闭</span>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setPreviewFullscreen(false) }}
+                    style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 12px', cursor: 'pointer' }}
+                  >
+                    关闭
+                  </button>
                 </div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
-                  {galleryActionIssue.imagePath}
+                <img
+                  src={toFilePreviewSrc(galleryActionIssue.imagePath)}
+                  alt={galleryActionIssue.imagePath}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ display: 'block', margin: '48px auto', cursor: 'default' }}
+                />
+              </div>
+            ) : (
+              <div
+                style={{
+                  background: 'var(--panel-bg, #fff)',
+                  borderRadius: 12,
+                  padding: 24,
+                  minWidth: 320,
+                  maxWidth: '90vw',
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div style={{ marginBottom: 8, textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  {currentIdx + 1} / {currentList.length}
+                  {previewZoom !== 1 && ` · ${Math.round(previewZoom * 100)}%`}
+                </div>
+                <div style={{ marginBottom: 16, textAlign: 'center' }}>
+                  <div
+                    style={{
+                      position: 'relative', width: '100%', maxHeight: 400, borderRadius: 8,
+                      overflow: 'auto', background: '#1111', marginBottom: 12, cursor: 'zoom-in',
+                    }}
+                    onWheel={(e) => {
+                      e.stopPropagation()
+                      setPreviewZoom((prev) => {
+                        const next = prev + (e.deltaY < 0 ? 0.15 : -0.15)
+                        return Math.max(0.2, Math.min(5, next))
+                      })
+                    }}
+                  >
+                    {displayMode === 'thumbnail' && (galleryActionIssue.thumbnailPaths || galleryActionIssue.thumbnailPath) ? (
+                      <img
+                        src={getThumbSrc(galleryActionIssue, 'medium') || getThumbSrc(galleryActionIssue, 'small')}
+                        alt={galleryActionIssue.imagePath}
+                        style={{ width: `${previewZoom * 100}%`, objectFit: 'contain', transition: 'width 0.1s ease' }}
+                      />
+                    ) : (
+                      <img
+                        src={toFilePreviewSrc(galleryActionIssue.imagePath)}
+                        alt={galleryActionIssue.imagePath}
+                        style={{ width: `${previewZoom * 100}%`, objectFit: 'contain', transition: 'width 0.1s ease' }}
+                        onError={(e) => {
+                          ;(e.currentTarget as HTMLImageElement).style.display = 'none'
+                          const fallback = document.createElement('div')
+                          fallback.textContent = '无法加载图片'
+                          fallback.style.cssText = 'padding:24px;color:var(--text-muted);text-align:center'
+                          ;(e.currentTarget as HTMLImageElement).parentElement?.appendChild(fallback)
+                        }}
+                      />
+                    )}
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
+                    {galleryActionIssue.imagePath}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => {
+                      void handleOpenFile(galleryActionIssue.imagePath)
+                      setGalleryActionIssue(null)
+                    }}
+                  >
+                    打开文件
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      void handleOpenFolder(galleryActionIssue.imagePath)
+                      setGalleryActionIssue(null)
+                    }}
+                  >
+                    打开目录
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => { setPreviewFullscreen(true); setPreviewZoom(1) }}
+                  >
+                    全屏原图
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setPreviewZoom(1)}
+                  >
+                    重置缩放
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => { setGalleryActionIssue(null); setPreviewZoom(1); setPreviewFullscreen(false) }}
+                  >
+                    取消
+                  </button>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => {
-                    void handleOpenFile(galleryActionIssue.imagePath)
-                    setGalleryActionIssue(null)
-                  }}
-                >
-                  打开文件
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => {
-                    void handleOpenFolder(galleryActionIssue.imagePath)
-                    setGalleryActionIssue(null)
-                  }}
-                >
-                  打开目录
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setGalleryActionIssue(null)}
-                >
-                  取消
-                </button>
-              </div>
-            </div>
+            )}
           </div>
         )
       })()}
