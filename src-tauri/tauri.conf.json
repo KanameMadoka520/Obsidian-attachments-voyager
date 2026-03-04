@@ -63,7 +63,11 @@
         "height": 700,
         "resizable": true,
         "title": "Obsidian Attachments Voyager",
-        "width": 1000
+        "width": 1000,
+        "decorations": false,
+        "transparent": false,
+        "minWidth": 800,
+        "minHeight": 500
       }
     ]
   }
