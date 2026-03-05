@@ -170,7 +170,7 @@ Obsidian-attachments-voyager/
 │   ├── App.tsx                    # 根组件，设置管理，主题切换
 │   ├── main.tsx                   # React 入口
 │   ├── types.ts                   # 类型定义
-│   ├── index.css                  # 全局样式（四套主题变量）
+│   ├── index.css                  # 全局样式（约 1301 行，四套主题变量）
 │   ├── components/                # UI 组件
 │   │   ├── TitleBar.tsx           # 自定义标题栏
 │   │   ├── Toolbar.tsx            # 工具栏（扫描/修复/导出）
