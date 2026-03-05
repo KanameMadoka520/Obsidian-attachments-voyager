@@ -53,6 +53,7 @@ test('requires confirmation before execute', async () => {
         totalMd: 1,
         totalImages: 1,
         issues: [{ id: '1', type: 'orphan', imagePath: '/x.png', reason: 'unused', thumbnailPath: '/t/x.png' }],
+        scanIndex: { files: {}, mdRefs: {} },
       })
     }
     return Promise.resolve([])

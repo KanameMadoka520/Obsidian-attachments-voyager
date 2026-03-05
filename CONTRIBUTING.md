@@ -112,6 +112,7 @@ npm run tauri:build
 | `components/Toolbar.tsx` | - | 工具栏（扫描/修复/导出） |
 | `components/Sidebar.tsx` | - | 侧边栏（分类/搜索/筛选） |
 | `components/StatusBar.tsx` | - | 底部状态栏 + 日志抽屉 |
+| `lib/i18n.ts` | - | 中英双语翻译模块（150+ 键值，LangContext + useLang hook） |
 
 ### 后端（`src-tauri/src/`）
 
@@ -131,9 +132,8 @@ npm run tauri:build
 
 | 命令 | 功能 |
 |------|------|
-| `scan_vault` | 扫描仓库，返回问题列表（接受 `window: tauri::Window` 参数推送进度） |
+| `scan_vault` | 扫描仓库，返回问题列表（接受 `window: tauri::Window` + `prev_index: Option<ScanIndex>` 增量扫描参数） |
 | `fix_issues` | 执行修复（移动/删除） |
-| `undo_task` / `undo_entry` | 撤回操作 |
 | `execute_migration` | 笔记迁移 |
 | `open_file` / `open_file_parent` | 用系统程序打开文件/在文件管理器中显示 |
 | `clear_thumbnail_cache` | 清除全部缩略图缓存 |
@@ -146,8 +146,8 @@ npm run tauri:build
 ### 数据存储
 
 - **用户设置/缓存**：存储在 exe 同目录的 `voyager-data/` 文件夹，每个 key 一个 `.json` 文件
+- **操作历史**：持久化到 `voyager-data/ops-history.json`，启动时自动加载，重启后不丢失
 - **缩略图缓存**：存储在扫描仓库根目录的 `.voyager-gallery-cache/`
-- **操作历史**：通过 `ops_log.rs` 以 JSON 持久化
 
 ---
 
@@ -215,6 +215,7 @@ npm test
 vi.mock('@tauri-apps/api/tauri', () => ({
   invoke: vi.fn().mockImplementation((cmd: string) => {
     if (cmd === 'read_all_local_storage') return Promise.resolve({})
+    if (cmd === 'scan_vault') return Promise.resolve({ totalMd: 0, totalImages: 0, issues: [], scanIndex: { files: {}, mdRefs: {} } })
     return Promise.resolve([])
   }),
   convertFileSrc: (p: string) => `tauri-file://${p}`,
@@ -270,7 +271,7 @@ vi.mock('@tauri-apps/api/window', () => ({
 本工具操作用户的本地文件，**数据安全是最高优先级**：
 
 - **只读先行**：任何删除/移动操作必须先扫描预览，用户确认后才执行
-- **永远可撤回**：所有修复操作记录在操作历史中，支持撤回（删除操作除外）
+- **操作可追溯**：所有修复操作记录在操作历史中（持久化到 JSON），用于审计和追溯。修复操作执行后无法自动撤回，UI 会提醒用户提前备份
 - **出错即停**：批量操作遇到错误立即停止并报告，不吞错误继续
 - **不要 `unwrap()`**：Rust 代码中文件操作使用 `?` 或 `.map_err()` 传播错误，避免 panic
 
@@ -292,11 +293,30 @@ rm -rf node_modules && npm install
 项目不使用浏览器 localStorage，而是通过 Rust 后端将数据存储在 exe 同目录的 `voyager-data/` 文件夹。前端通过 `src/lib/storage.ts` 模块操作。
 
 ### 扫描结果缓存键版本
-当前缓存键为 `voyager-cached-scan-result-v3`。**如果修改了 `ScanIssue`（Rust）或 `AuditIssue`（TypeScript）的数据结构，必须 bump 缓存版本号**（v3 → v4），否则旧缓存数据会导致新字段为 undefined。
+当前缓存键为 `voyager-cached-scan-result-v4`。**如果修改了 `ScanResult`/`ScanIssue`（Rust）或 `AuditIssue`（TypeScript）的数据结构，必须 bump 缓存版本号**（v4 → v5），否则旧缓存数据会导致新字段为 undefined。
 
 版本历史：
 - v1 → v2：添加 `fileSize` 字段
 - v2 → v3：添加 `fileMtime` 字段
+- v3 → v4：添加 `scanIndex`（ScanIndex）字段到 ScanResult
+
+### i18n（国际化）
+- 翻译模块在 `src/lib/i18n.ts`，包含 150+ 翻译键值（zh/en）
+- 使用 React Context（`LangContext` + `useLang()` hook），无外部依赖
+- `UiSettings` 中新增 `lang: Lang` 字段（`Lang = 'zh' | 'en'`）
+- 新增/修改 UI 文本时，必须在 `i18n.ts` 中添加对应的中英文翻译
+- `export.ts` 导出函数接受 `lang` 参数
+
+### 增量扫描
+- `scan_vault` 命令接受 `prev_index: Option<ScanIndex>` 参数
+- `ScanIndex` 包含 `files`（路径→mtime）和 `mdRefs`（MD路径→引用列表）
+- 后端比对 mtime，跳过未变化的 MD 文件，复用上次的引用数据
+- `ScanResult` 返回值中包含 `scanIndex` 字段
+
+### 图片缓存刷新
+- `ScanPage` 维护 `scanVersion` 状态，每次扫描后递增
+- 所有图片/缩略图 URL 追加 `?v={scanVersion}` 查询参数
+- 测试中图片 `src` 断言应使用 `.toContain()` 而非精确匹配（因 URL 末尾有 `?v=N`）
 
 ### 缩略图格式
 缩略图使用 WebP 格式（不是 PNG），缓存文件扩展名为 `.webp`。如果之前有旧的 PNG 缓存，需要在设置中点击「清除缩略图缓存」让系统重新生成 WebP 版本。

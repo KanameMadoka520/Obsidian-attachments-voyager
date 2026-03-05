@@ -16,7 +16,7 @@ pub mod thumb_cache;
 
 use models::{ScanIssue, ScanResult};
 use ops_log::{
-    create_task, get_entry, get_task, list_tasks, save_task, update_task, ConflictPolicy, EntryStatus,
+    create_task, list_tasks, load_from_disk, save_task, ConflictPolicy, EntryStatus,
     OperationEntry, TaskStatus,
 };
 use runtime_log::{append_runtime_log, list_runtime_logs, RuntimeLogLine};
@@ -38,54 +38,8 @@ struct CacheClearSummary {
     cache_dir: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct UndoSummary {
-    task_id: Option<String>,
-    entry_id: Option<String>,
-    undone: usize,
-    skipped: usize,
-    warnings: Vec<String>,
-}
-
-fn undo_entry_impl(entry: &mut OperationEntry) -> Result<bool, String> {
-    if entry.status == EntryStatus::Undone {
-        return Ok(false);
-    }
-
-    let source = Path::new(&entry.source);
-    let target = Path::new(&entry.target);
-
-    match entry.action.as_str() {
-        "move" => {
-            if !target.exists() {
-                entry.status = EntryStatus::Skipped;
-                entry.message = Some("无法找到该文件，请自行检查".to_string());
-                return Ok(false);
-            }
-
-            if let Some(parent) = source.parent() {
-                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            fs::rename(target, source).map_err(|e| e.to_string())?;
-            entry.status = EntryStatus::Undone;
-            Ok(true)
-        }
-        "delete" => {
-            entry.status = EntryStatus::Skipped;
-            entry.message = Some("删除操作无法自动撤回，请自行检查".to_string());
-            Ok(false)
-        }
-        _ => {
-            entry.status = EntryStatus::Skipped;
-            entry.message = Some("未知操作类型，无法撤回".to_string());
-            Ok(false)
-        }
-    }
-}
-
 #[tauri::command]
-fn scan_vault(window: tauri::Window, root: String, generate_thumbs: Option<bool>, thumb_size: Option<u32>) -> Result<ScanResult, String> {
+fn scan_vault(window: tauri::Window, root: String, generate_thumbs: Option<bool>, thumb_size: Option<u32>, prev_index: Option<models::ScanIndex>) -> Result<ScanResult, String> {
     let generate_thumbs = generate_thumbs.unwrap_or(true);
     let thumb_size = thumb_size.unwrap_or(256);
 
@@ -104,7 +58,7 @@ fn scan_vault(window: tauri::Window, root: String, generate_thumbs: Option<bool>
         }));
     });
 
-    scanner::scan_vault_with_thumbs(Path::new(&root), generate_thumbs, thumb_size, Some(&progress)).map_err(|e| e.to_string())
+    scanner::scan_vault_with_thumbs(Path::new(&root), generate_thumbs, thumb_size, Some(&progress), prev_index.as_ref()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -306,101 +260,6 @@ fn list_operation_history() -> Vec<ops_log::OperationTask> {
 }
 
 #[tauri::command]
-fn undo_entry(entry_id: String) -> Result<UndoSummary, String> {
-    let Some((mut task, _entry_snapshot)) = get_entry(&entry_id) else {
-        return Ok(UndoSummary {
-            task_id: None,
-            entry_id: Some(entry_id),
-            undone: 0,
-            skipped: 1,
-            warnings: vec!["无法找到该文件，请自行检查".to_string()],
-        });
-    };
-
-    let mut undone = 0usize;
-    let mut skipped = 0usize;
-    let mut warnings = Vec::new();
-
-    for entry in &mut task.entries {
-        if entry.entry_id == entry_id {
-            match undo_entry_impl(entry)? {
-                true => undone += 1,
-                false => {
-                    skipped += 1;
-                    if let Some(msg) = &entry.message {
-                        warnings.push(msg.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    task.status = if task.entries.iter().all(|e| e.status == EntryStatus::Undone) {
-        TaskStatus::Undone
-    } else {
-        TaskStatus::PartiallyUndone
-    };
-    update_task(task.clone());
-
-    Ok(UndoSummary {
-        task_id: Some(task.task_id),
-        entry_id: Some(entry_id),
-        undone,
-        skipped,
-        warnings,
-    })
-}
-
-#[tauri::command]
-fn undo_task(task_id: String) -> Result<UndoSummary, String> {
-    let Some(mut task) = get_task(&task_id) else {
-        return Ok(UndoSummary {
-            task_id: Some(task_id),
-            entry_id: None,
-            undone: 0,
-            skipped: 1,
-            warnings: vec!["无法找到该文件，请自行检查".to_string()],
-        });
-    };
-
-    let mut undone = 0usize;
-    let mut skipped = 0usize;
-    let mut warnings = Vec::new();
-
-    for entry in task.entries.iter_mut().rev() {
-        if entry.status == EntryStatus::Undone {
-            skipped += 1;
-            continue;
-        }
-
-        match undo_entry_impl(entry)? {
-            true => undone += 1,
-            false => {
-                skipped += 1;
-                if let Some(msg) = &entry.message {
-                    warnings.push(msg.clone());
-                }
-            }
-        }
-    }
-
-    task.status = if task.entries.iter().all(|e| e.status == EntryStatus::Undone) {
-        TaskStatus::Undone
-    } else {
-        TaskStatus::PartiallyUndone
-    };
-    update_task(task.clone());
-
-    Ok(UndoSummary {
-        task_id: Some(task_id),
-        entry_id: None,
-        undone,
-        skipped,
-        warnings,
-    })
-}
-
-#[tauri::command]
 fn open_file(path: String) -> Result<(), String> {
     let p = Path::new(&path);
     if !p.exists() {
@@ -533,6 +392,7 @@ fn main() {
     let startup_report = startup_diag::collect_startup_report();
     startup_diag::write_startup_report(&startup_report);
     append_runtime_log("info", "application startup");
+    load_from_disk();
 
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -541,8 +401,6 @@ fn main() {
             execute_migration,
             fix_issues,
             list_operation_history,
-            undo_entry,
-            undo_task,
             open_file,
             open_file_parent,
             get_runtime_logs,

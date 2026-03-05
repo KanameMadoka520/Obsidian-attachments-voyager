@@ -1,3 +1,5 @@
+import { useLang } from '../App'
+
 interface ScanProgress {
   phase: 'collecting' | 'parsing' | 'thumbnails'
   current: number
@@ -9,13 +11,15 @@ interface ProgressBarProps {
   visible: boolean
 }
 
-const PHASE_LABELS: Record<string, string> = {
-  collecting: '收集文件中...',
-  parsing: '解析 Markdown...',
-  thumbnails: '生成缩略图...',
-}
-
 function ProgressBar({ progress, visible }: ProgressBarProps) {
+  const tr = useLang()
+
+  const PHASE_LABELS: Record<string, string> = {
+    collecting: tr.progressCollecting,
+    parsing: tr.progressParsing,
+    thumbnails: tr.progressThumbnails,
+  }
+
   if (!visible) return null
 
   if (!progress) {
@@ -24,7 +28,7 @@ function ProgressBar({ progress, visible }: ProgressBarProps) {
         <div className="progress-bar-track">
           <div className="progress-bar-fill progress-bar-indeterminate" />
         </div>
-        <span className="progress-bar-text">准备扫描...</span>
+        <span className="progress-bar-text">{tr.progressPreparing}</span>
       </div>
     )
   }

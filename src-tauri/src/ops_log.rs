@@ -21,7 +21,6 @@ impl Default for ConflictPolicy {
 #[serde(rename_all = "camelCase")]
 pub enum EntryStatus {
     Applied,
-    Undone,
     Failed,
     Skipped,
 }
@@ -30,8 +29,6 @@ pub enum EntryStatus {
 #[serde(rename_all = "camelCase")]
 pub enum TaskStatus {
     Applied,
-    PartiallyUndone,
-    Undone,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +76,36 @@ fn tasks() -> &'static Mutex<Vec<OperationTask>> {
     TASKS.get_or_init(|| Mutex::new(Vec::new()))
 }
 
+fn ops_history_path() -> std::path::PathBuf {
+    let exe = std::env::current_exe().unwrap_or_default();
+    let exe_dir = exe.parent().unwrap_or(std::path::Path::new("."));
+    exe_dir.join("voyager-data").join("ops-history.json")
+}
+
+pub fn load_from_disk() {
+    let path = ops_history_path();
+    if !path.exists() { return; }
+    let Ok(content) = std::fs::read_to_string(&path) else { return };
+    let Ok(tasks_from_disk) = serde_json::from_str::<Vec<OperationTask>>(&content) else { return };
+    if let Ok(mut guard) = tasks().lock() {
+        *guard = tasks_from_disk;
+        if guard.len() > 200 {
+            let keep_from = guard.len().saturating_sub(200);
+            guard.drain(0..keep_from);
+        }
+    }
+}
+
+fn save_to_disk(guard: &[OperationTask]) {
+    let path = ops_history_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string(guard) {
+        let _ = std::fs::write(&path, json);
+    }
+}
+
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -109,6 +136,7 @@ pub fn save_task(task: OperationTask) {
             let keep_from = guard.len().saturating_sub(200);
             guard.drain(0..keep_from);
         }
+        save_to_disk(&guard);
     }
 }
 
@@ -126,57 +154,13 @@ pub fn get_task(task_id: &str) -> Option<OperationTask> {
     guard.iter().find(|t| t.task_id == task_id).cloned()
 }
 
-pub fn update_task(updated: OperationTask) {
-    if let Ok(mut guard) = tasks().lock() {
-        if let Some(slot) = guard.iter_mut().find(|t| t.task_id == updated.task_id) {
-            *slot = updated;
-        }
-    }
-}
-
-pub fn get_entry(entry_id: &str) -> Option<(OperationTask, OperationEntry)> {
-    let Ok(guard) = tasks().lock() else {
-        return None;
-    };
-
-    for task in guard.iter() {
-        if let Some(entry) = task.entries.iter().find(|e| e.entry_id == entry_id) {
-            return Some((task.clone(), entry.clone()));
-        }
-    }
-
-    None
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{ConflictPolicy, EntryStatus, OperationEntry, TaskStatus};
+    use super::ConflictPolicy;
 
     #[test]
     fn default_conflict_policy_is_rename_all() {
         let policy = ConflictPolicy::default();
         assert!(matches!(policy, ConflictPolicy::RenameAll));
-    }
-
-    #[test]
-    fn operation_entry_can_be_marked_undone() {
-        let entry = OperationEntry {
-            entry_id: "entry-1".to_string(),
-            file_path: "a.png".to_string(),
-            action: "move".to_string(),
-            source: "old/a.png".to_string(),
-            target: "new/a.png".to_string(),
-            status: EntryStatus::Undone,
-            message: None,
-        };
-
-        assert!(matches!(entry.status, EntryStatus::Undone));
-    }
-
-    #[test]
-    fn task_status_partially_undone_serializes() {
-        let status = TaskStatus::PartiallyUndone;
-        let json = serde_json::to_string(&status).unwrap();
-        assert!(json.contains("partiallyUndone"));
     }
 }
