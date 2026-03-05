@@ -1,22 +1,25 @@
+import { useLang } from '../App'
+
 interface MigratePlanTableProps {
   items: string[]
 }
 
 function MigratePlanTable({ items }: MigratePlanTableProps) {
+  const tr = useLang()
   return (
     <section className="card">
-      <h2 className="card-title">迁移预览视图</h2>
+      <h2 className="card-title">{tr.migratePlanTitle}</h2>
       <div className="table-wrapper">
         <table className="data-table">
           <thead>
             <tr>
-              <th>迁移指令路径映射</th>
+              <th>{tr.migratePlanColMapping}</th>
             </tr>
           </thead>
           <tbody>
             {items.length === 0 ? (
               <tr>
-                <td className="empty-state">尚无生成的迁移计划，请先配置路径并点击预览</td>
+                <td className="empty-state">{tr.migratePlanEmpty}</td>
               </tr>
             ) : (
               items.map((item, index) => (

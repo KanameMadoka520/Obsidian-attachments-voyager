@@ -1,4 +1,4 @@
-use crate::models::{ScanIssue, ScanResult};
+use crate::models::{ScanIndex, ScanIssue, ScanResult};
 use crate::parser::extract_image_refs;
 use crate::thumb_cache;
 use anyhow::Result;
@@ -18,8 +18,9 @@ pub fn scan_vault_with_thumbs(
     generate_thumbs: bool,
     _thumb_size: u32,
     progress: Option<&ProgressFn>,
+    prev_index: Option<&ScanIndex>,
 ) -> Result<ScanResult> {
-    let mut result = scan_vault(root, progress)?;
+    let mut result = scan_vault(root, progress, prev_index)?;
 
     if !generate_thumbs {
         return Ok(result);
@@ -62,7 +63,7 @@ pub fn scan_vault_with_thumbs(
     Ok(result)
 }
 
-pub fn scan_vault(root: &Path, progress: Option<&ProgressFn>) -> Result<ScanResult> {
+pub fn scan_vault(root: &Path, progress: Option<&ProgressFn>, prev_index: Option<&ScanIndex>) -> Result<ScanResult> {
     let mut md_files = Vec::new();
     let mut image_files = Vec::new();
     collect_files(root, &mut md_files, &mut image_files)?;
@@ -73,14 +74,46 @@ pub fn scan_vault(root: &Path, progress: Option<&ProgressFn>) -> Result<ScanResu
 
     let mut referenced_filenames = HashSet::new();
     let mut references: Vec<(PathBuf, String)> = Vec::new();
+    let mut new_md_refs: HashMap<String, Vec<String>> = HashMap::new();
 
     let md_total = md_files.len();
     for (i, md) in md_files.iter().enumerate() {
-        let content = fs::read_to_string(md)?;
-        for name in extract_image_refs(&content) {
+        let md_key = md.to_string_lossy().to_string();
+        let current_mtime = fs::metadata(md)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let refs: Vec<String> = if let Some(prev) = prev_index {
+            if let Some(&prev_mtime) = prev.files.get(&md_key) {
+                if prev_mtime == current_mtime {
+                    if let Some(cached_refs) = prev.md_refs.get(&md_key) {
+                        cached_refs.clone()
+                    } else {
+                        let content = fs::read_to_string(md)?;
+                        extract_image_refs(&content)
+                    }
+                } else {
+                    let content = fs::read_to_string(md)?;
+                    extract_image_refs(&content)
+                }
+            } else {
+                let content = fs::read_to_string(md)?;
+                extract_image_refs(&content)
+            }
+        } else {
+            let content = fs::read_to_string(md)?;
+            extract_image_refs(&content)
+        };
+
+        for name in &refs {
             referenced_filenames.insert(name.clone());
-            references.push((md.clone(), name));
+            references.push((md.clone(), name.clone()));
         }
+        new_md_refs.insert(md_key, refs);
+
         if let Some(cb) = &progress {
             if (i + 1) % 100 == 0 || i + 1 == md_total {
                 cb("parsing", i + 1, md_total);
@@ -152,10 +185,37 @@ pub fn scan_vault(root: &Path, progress: Option<&ProgressFn>) -> Result<ScanResu
         }
     }
 
+    // Build new ScanIndex with all file mtimes and md refs
+    let mut file_mtimes: HashMap<String, u64> = HashMap::new();
+    for md in &md_files {
+        let key = md.to_string_lossy().to_string();
+        let mtime = fs::metadata(md)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        file_mtimes.insert(key, mtime);
+    }
+    for img in &image_files {
+        let key = img.to_string_lossy().to_string();
+        let mtime = fs::metadata(img)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        file_mtimes.insert(key, mtime);
+    }
+
     Ok(ScanResult {
         total_md: md_files.len(),
         total_images: image_files.len(),
         issues,
+        scan_index: ScanIndex {
+            files: file_mtimes,
+            md_refs: new_md_refs,
+        },
     })
 }
 
@@ -230,7 +290,7 @@ mod tests {
         fs::write(wrong_dir.join("x.png"), b"x").unwrap();
         fs::write(right_dir.join("orphan.png"), b"o").unwrap();
 
-        let result = scan_vault(&root, None).unwrap();
+        let result = scan_vault(&root, None, None).unwrap();
 
         assert!(result.issues.iter().any(|i| i.r#type == "misplaced"));
         assert!(result.issues.iter().any(|i| i.r#type == "orphan"));

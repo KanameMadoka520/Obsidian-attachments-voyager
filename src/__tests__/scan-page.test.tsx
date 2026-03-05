@@ -87,6 +87,7 @@ test('scan button invokes backend and renders result stats', async () => {
           { id: '1', type: 'orphan', imagePath: '/a.png', reason: 'unused', thumbnailPath: '/t/a.png' },
           { id: '2', type: 'misplaced', imagePath: '/b.png', reason: 'wrong dir', thumbnailPath: '/t/b.png' },
         ],
+        scanIndex: { files: {}, mdRefs: {} },
       })
     }
     if (cmd === 'get_runtime_logs' || cmd === 'list_operation_history') {
@@ -106,15 +107,15 @@ test('scan button invokes backend and renders result stats', async () => {
   fireEvent.click(screen.getByRole('button', { name: '扫描' }))
 
   await waitFor(() => {
-    expect(invokeMock).toHaveBeenCalledWith('scan_vault', {
+    expect(invokeMock).toHaveBeenCalledWith('scan_vault', expect.objectContaining({
       root: 'D:/vault',
       generate_thumbs: true,
       thumb_size: 256,
-    })
+    }))
   })
 
   const img = await screen.findByAltText('/a.png')
-  expect(img).toHaveAttribute('src', 'tauri-file:///t/a.png')
+  expect(img.getAttribute('src')).toContain('tauri-file:///t/a.png')
 })
 
 test('fix requires selecting issues and supports select all', async () => {
@@ -127,6 +128,7 @@ test('fix requires selecting issues and supports select all', async () => {
           { id: '1', type: 'orphan', imagePath: '/a.png', reason: 'unused', thumbnailPath: '/t/a.png' },
           { id: '2', type: 'misplaced', imagePath: '/b.png', reason: 'wrong dir', suggestedTarget: '/t/b.png', thumbnailPath: '/t/b.png' },
         ],
+        scanIndex: { files: {}, mdRefs: {} },
       })
     }
     if (cmd === 'get_runtime_logs' || cmd === 'list_operation_history') {

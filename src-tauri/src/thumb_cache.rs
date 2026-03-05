@@ -1,6 +1,6 @@
 use anyhow::Result;
 use image::imageops::FilterType;
-use image::ImageFormat;
+use image::{DynamicImage, ImageFormat};
 use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
@@ -146,23 +146,34 @@ pub fn generate_thumbnail_multi(original_path: &str, sizes: &[(&str, u32)]) -> R
         });
     }
 
-    // Open image once, resize for each missing size
+    // Open image once; cascade from largest to smallest so each smaller
+    // thumbnail is resized from the previous larger one, not the original.
     let img = image::open(original)?;
     let mut generated_count = 0usize;
 
-    for (label, max_edge) in sizes {
+    // Process sizes from largest to smallest for cascade resizing
+    let mut sizes_desc: Vec<(&str, u32)> = sizes.to_vec();
+    sizes_desc.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let mut prev_thumb: Option<DynamicImage> = None;
+
+    for (label, max_edge) in &sizes_desc {
         let dir = cache_dir_for_size(label);
         let thumb_path = dir.join(&filename);
 
         if thumb_path.exists() {
             paths.insert(label.to_string(), thumb_path.to_string_lossy().to_string());
+            // Load existing thumb to maintain the cascade chain
+            prev_thumb = Some(image::open(&thumb_path)?);
             continue;
         }
 
         fs::create_dir_all(&dir)?;
-        let thumb = img.resize(*max_edge, *max_edge, FilterType::Triangle);
+        let source = prev_thumb.as_ref().unwrap_or(&img);
+        let thumb = source.resize(*max_edge, *max_edge, FilterType::Triangle);
         thumb.save_with_format(&thumb_path, ImageFormat::WebP)?;
         paths.insert(label.to_string(), thumb_path.to_string_lossy().to_string());
+        prev_thumb = Some(thumb);
         generated_count += 1;
     }
 

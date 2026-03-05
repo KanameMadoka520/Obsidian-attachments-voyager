@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { useLang } from '../App'
 import {
   PieChart,
   Pie,
@@ -47,6 +48,7 @@ function getExtension(filePath: string): string {
 }
 
 export default function StatsPage({ result }: StatsPageProps) {
+  const tr = useLang()
   const orphanCount = useMemo(() => {
     if (!result) return 0
     return result.issues.filter((i) => i.type === 'orphan').length
@@ -158,7 +160,7 @@ export default function StatsPage({ result }: StatsPageProps) {
   if (!result) {
     return (
       <div className="stats-page" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-        <p>请先在「附件扫描」页面执行扫描</p>
+        <p>{tr.statsNoData}</p>
       </div>
     )
   }
@@ -170,30 +172,30 @@ export default function StatsPage({ result }: StatsPageProps) {
     <div className="stats-page" style={{ overflowY: 'auto' }}>
       {/* 1. Overview Cards */}
       <div className="stats-section">
-        <h3 className="stats-section-title">仓库总览</h3>
+        <h3 className="stats-section-title">{tr.statsOverview}</h3>
         <div className="stats-cards">
           <div className="stats-card">
             <div className="stats-card-value">{result.totalMd}</div>
-            <div className="stats-card-label">总 Markdown 文件</div>
+            <div className="stats-card-label">{tr.statsTotalMd}</div>
           </div>
           <div className="stats-card">
             <div className="stats-card-value">{result.totalImages}</div>
-            <div className="stats-card-label">总图片文件</div>
+            <div className="stats-card-label">{tr.statsTotalImages}</div>
           </div>
           <div className="stats-card">
             <div className="stats-card-value">{result.issues.length}</div>
-            <div className="stats-card-label">问题数</div>
+            <div className="stats-card-label">{tr.statsIssueCount}</div>
           </div>
           <div className="stats-card">
             <div className="stats-card-value">{orphanCount} / {misplacedCount}</div>
-            <div className="stats-card-label">孤立/错位</div>
+            <div className="stats-card-label">{tr.statsOrphanMisplaced}</div>
           </div>
         </div>
       </div>
 
       {/* 2. Orphan vs Misplaced Pie Chart */}
       <div className="stats-section">
-        <h3 className="stats-section-title">问题类型分布</h3>
+        <h3 className="stats-section-title">{tr.statsIssueTypeDist}</h3>
         <div className="stats-chart">
           <PieChart width={400} height={300}>
             <Pie
@@ -216,7 +218,7 @@ export default function StatsPage({ result }: StatsPageProps) {
 
       {/* 3. File Type Distribution Pie Chart */}
       <div className="stats-section">
-        <h3 className="stats-section-title">文件类型分布</h3>
+        <h3 className="stats-section-title">{tr.statsFileTypeDist}</h3>
         <div className="stats-chart">
           <PieChart width={400} height={300}>
             <Pie
@@ -239,7 +241,7 @@ export default function StatsPage({ result }: StatsPageProps) {
 
       {/* 4. File Size Distribution Bar Chart */}
       <div className="stats-section">
-        <h3 className="stats-section-title">文件大小分布</h3>
+        <h3 className="stats-section-title">{tr.statsFileSizeDist}</h3>
         <div className="stats-chart">
           <BarChart width={500} height={300} data={fileSizeData}>
             <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
@@ -253,7 +255,7 @@ export default function StatsPage({ result }: StatsPageProps) {
 
       {/* 5. Top 10 Problem Directories */}
       <div className="stats-section">
-        <h3 className="stats-section-title">问题目录 Top 10</h3>
+        <h3 className="stats-section-title">{tr.statsTopDirs}</h3>
         <div className="stats-chart">
           <BarChart
             width={600}
@@ -277,7 +279,7 @@ export default function StatsPage({ result }: StatsPageProps) {
 
       {/* 6. File Time Distribution */}
       <div className="stats-section">
-        <h3 className="stats-section-title">文件时间分布</h3>
+        <h3 className="stats-section-title">{tr.statsTimeDist}</h3>
         <div className="stats-chart">
           {timeData.length > 0 ? (
             <BarChart width={600} height={300} data={timeData}>
@@ -288,22 +290,22 @@ export default function StatsPage({ result }: StatsPageProps) {
               <Bar dataKey="count" fill={COLORS[4]} />
             </BarChart>
           ) : (
-            <p>暂无时间数据</p>
+            <p>{tr.statsNoTimeData}</p>
           )}
         </div>
       </div>
 
       {/* 7. Duplicate Files Table */}
       <div className="stats-section">
-        <h3 className="stats-section-title">重复文件检测</h3>
+        <h3 className="stats-section-title">{tr.statsDuplicateFiles}</h3>
         {duplicateFiles.length > 0 ? (
           <table className="stats-table">
             <thead>
               <tr>
-                <th>文件名</th>
-                <th>大小</th>
-                <th>数量</th>
-                <th>路径列表</th>
+                <th>{tr.statsDupFileName}</th>
+                <th>{tr.statsDupSize}</th>
+                <th>{tr.statsDupCount}</th>
+                <th>{tr.statsDupPaths}</th>
               </tr>
             </thead>
             <tbody>
@@ -324,7 +326,7 @@ export default function StatsPage({ result }: StatsPageProps) {
             </tbody>
           </table>
         ) : (
-          <p>未检测到重复文件</p>
+          <p>{tr.statsNoDuplicates}</p>
         )}
       </div>
     </div>

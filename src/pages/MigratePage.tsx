@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { open } from '@tauri-apps/api/dialog'
 import { invoke } from '@tauri-apps/api/tauri'
+import { useLang } from '../App'
 import MigratePlanTable from '../components/MigratePlanTable'
 import OperationHistoryPanel from '../components/OperationHistoryPanel'
 import WorkLogPanel from '../components/WorkLogPanel'
@@ -12,15 +13,12 @@ interface MigrateSummary {
   movedAssets: number
 }
 
-interface UndoSummary {
-  warnings: string[]
-}
-
 interface MigratePageProps {
   conflictPolicy: ConflictPolicy
 }
 
 function MigratePage({ conflictPolicy }: MigratePageProps) {
+  const tr = useLang()
   const [notePath, setNotePath] = useState('')
   const [targetDir, setTargetDir] = useState('')
   const [previewItems, setPreviewItems] = useState<string[]>([])
@@ -59,17 +57,17 @@ function MigratePage({ conflictPolicy }: MigratePageProps) {
   const previewPlan = () => {
     if (!notePath.trim() || !targetDir.trim()) {
       setPreviewItems([])
-      setMessage('请先填写笔记路径和目标目录')
+      setMessage(tr.migrateNoPathError)
       return
     }
 
     setPreviewItems([`${notePath.trim()} -> ${targetDir.trim()}`])
-    setMessage('已生成迁移预览')
+    setMessage(tr.migratePreviewGenerated)
   }
 
   const executeMigration = async (policy: ConflictPolicy = conflictPolicy) => {
     if (previewItems.length === 0) {
-      setMessage('请先生成迁移预览再执行')
+      setMessage(tr.migrateNoPreviewError)
       return
     }
 
@@ -80,89 +78,77 @@ function MigratePage({ conflictPolicy }: MigratePageProps) {
         targetDir: targetDir.trim(),
         policy,
       })
-      setMessage(`迁移完成：task=${summary.taskId}，笔记 ${summary.movedNotes}，附件 ${summary.movedAssets}`)
+      setMessage(tr.migrateComplete.replace('{taskId}', summary.taskId).replace('{movedNotes}', String(summary.movedNotes)).replace('{movedAssets}', String(summary.movedAssets)))
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       if (msg.includes('CONFLICT')) {
-        const overwrite = window.confirm('检测到重名冲突。确定选择“覆盖”吗？取消将使用“改名共存”。')
+        const overwrite = window.confirm(tr.migrateConflictPrompt)
         await executeMigration(overwrite ? 'overwriteAll' : 'renameAll')
         return
       }
-      setMessage(`迁移失败：${msg}`)
+      setMessage(tr.migrateFailed.replace('{message}', msg))
     } finally {
       setExecuting(false)
       await refreshOps()
     }
   }
 
-  const handleUndoTask = async (taskId: string) => {
-    const summary = await invoke<UndoSummary>('undo_task', { taskId })
-    setMessage(summary.warnings.length > 0 ? summary.warnings.join('；') : '任务撤回完成')
-    await refreshOps()
-  }
-
-  const handleUndoEntry = async (entryId: string) => {
-    const summary = await invoke<UndoSummary>('undo_entry', { entryId })
-    setMessage(summary.warnings.length > 0 ? summary.warnings.join('；') : '文件撤回完成')
-    await refreshOps()
-  }
-
   return (
     <div className="page-wrapper">
       <section className="card">
-        <h2 className="card-title">迁移配置</h2>
+        <h2 className="card-title">{tr.migrateConfigTitle}</h2>
 
         <div className="input-group">
-          <label htmlFor="note-path" className="input-label">选择笔记</label>
+          <label htmlFor="note-path" className="input-label">{tr.migrateSelectNote}</label>
           <input
             id="note-path"
             className="input-field"
             value={notePath}
             onChange={(e) => setNotePath(e.target.value)}
-            placeholder="输入或选择要迁移的笔记路径..."
+            placeholder={tr.migrateNotePlaceholder}
           />
         </div>
 
         <div className="input-group">
-          <label htmlFor="target-dir" className="input-label">目标目录</label>
+          <label htmlFor="target-dir" className="input-label">{tr.migrateTargetDir}</label>
           <input
             id="target-dir"
             className="input-field"
             value={targetDir}
             onChange={(e) => setTargetDir(e.target.value)}
-            placeholder="输入或选择目标目录..."
+            placeholder={tr.migrateTargetPlaceholder}
           />
           <button type="button" className="btn btn-secondary" onClick={pickTargetDir}>
-            选择目录
+            {tr.migratePickDir}
           </button>
         </div>
 
         <div className="input-group" style={{ marginTop: '24px' }}>
           <button type="button" className="btn btn-secondary" onClick={previewPlan}>
-            预览迁移计划
+            {tr.migratePreviewPlan}
           </button>
           <button type="button" className="btn btn-primary" onClick={() => executeMigration()} disabled={executing}>
-            {executing ? '执行中...' : '执行迁移'}
+            {executing ? tr.migrateExecuting : tr.migrateExecute}
           </button>
         </div>
 
         {message && (
-          <div className={`alert ${message.includes('失败') || message.includes('无法找到') ? 'alert-error' : 'alert-success'}`} role="status">
+          <div className={`alert ${message.includes('失败') || message.includes('failed') || message.includes('Failed') ? 'alert-error' : 'alert-success'}`} role="status">
             {message}
           </div>
         )}
       </section>
 
       <section className="card">
-        <h2 className="card-title">工作原理说明（联动迁移）</h2>
+        <h2 className="card-title">{tr.migrateExplainTitle}</h2>
         <p style={{ color: 'var(--text-muted)' }}>
-          联动迁移会把笔记与其关联附件按目标目录一起迁移，并在冲突时根据策略（弹窗/覆盖/改名共存）处理同名文件。
+          {tr.migrateExplainBody}
         </p>
       </section>
 
       <MigratePlanTable items={previewItems} />
       <WorkLogPanel logs={logs} />
-      <OperationHistoryPanel tasks={tasks} onUndoTask={handleUndoTask} onUndoEntry={handleUndoEntry} />
+      <OperationHistoryPanel tasks={tasks} />
     </div>
   )
 }

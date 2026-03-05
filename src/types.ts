@@ -1,3 +1,5 @@
+export type Lang = 'zh' | 'en'
+
 export type IssueType = 'orphan' | 'misplaced' | 'multi_ref_conflict' | 'target_conflict'
 
 export interface AuditIssue {
@@ -13,10 +15,16 @@ export interface AuditIssue {
   fileMtime?: number
 }
 
+export interface ScanIndex {
+  files: Record<string, number>
+  mdRefs: Record<string, string[]>
+}
+
 export interface ScanResult {
   totalMd: number
   totalImages: number
   issues: AuditIssue[]
+  scanIndex: ScanIndex
 }
 
 export type GalleryDisplayMode = 'thumbnail' | 'rawImage' | 'noImage'
@@ -33,7 +41,7 @@ export interface OperationEntry {
   action: 'move' | 'delete'
   source: string
   target: string
-  status: 'applied' | 'undone' | 'failed' | 'skipped'
+  status: 'applied' | 'failed' | 'skipped'
   message?: string
 }
 
@@ -42,7 +50,7 @@ export interface OperationTask {
   taskType: 'migration' | 'fix'
   createdAt: string
   policy: ConflictPolicy
-  status: 'applied' | 'partiallyUndone' | 'undone'
+  status: 'applied'
   entries: OperationEntry[]
 }
 

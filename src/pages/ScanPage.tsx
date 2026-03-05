@@ -3,6 +3,7 @@ import { open, save } from '@tauri-apps/api/dialog'
 import { invoke, convertFileSrc } from '@tauri-apps/api/tauri'
 import { listen } from '@tauri-apps/api/event'
 import { appWindow } from '@tauri-apps/api/window'
+import { useLang } from '../App'
 import ConfirmDialog from '../components/ConfirmDialog'
 import ContextMenu from '../components/ContextMenu'
 import type { MenuItem } from '../components/ContextMenu'
@@ -31,10 +32,6 @@ interface FixSummary {
   skipped: number
 }
 
-interface UndoSummary {
-  warnings: string[]
-}
-
 interface ScanPageProps {
   conflictPolicy: ConflictPolicy
   onScanComplete?: (result: ScanResult) => void
@@ -43,7 +40,7 @@ interface ScanPageProps {
 const RECENT_VAULTS_KEY = 'voyager-recent-vaults-v1'
 const DISPLAY_MODE_KEY = 'voyager-display-mode-v1'
 const LAST_VAULT_KEY = 'voyager-last-vault-v1'
-const CACHED_RESULT_KEY = 'voyager-cached-scan-result-v3'
+const CACHED_RESULT_KEY = 'voyager-cached-scan-result-v4'
 
 function loadDisplayMode(): GalleryDisplayMode {
   const raw = storage.getItem(DISPLAY_MODE_KEY)
@@ -94,27 +91,21 @@ function saveCachedResult(result: ScanResult | undefined) {
   }
 }
 
-function toFilePreviewSrc(path: string) {
+function toFilePreviewSrc(path: string, bustCache?: string) {
   const normalized = path.split('\\').join('/')
-  return convertFileSrc(normalized)
-}
-
-function toThumbPreviewSrc(path?: string) {
-  if (!path) return ''
-  return toFilePreviewSrc(path)
-}
-
-function getThumbSrc(issue: AuditIssue, size: 'tiny' | 'small' | 'medium'): string {
-  const path = issue.thumbnailPaths?.[size] ?? (size === 'small' ? issue.thumbnailPath : undefined)
-  return path ? toFilePreviewSrc(path) : ''
+  const src = convertFileSrc(normalized)
+  return bustCache ? `${src}?v=${bustCache}` : src
 }
 
 function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
+  const tr = useLang()
   const [vaultPath, setVaultPath] = useState(() => loadLastVault())
   const [recentVaults, setRecentVaults] = useState<string[]>(() => loadRecentVaults())
   const [result, setResult] = useState<ScanResult | undefined>(() => loadCachedResult())
   const [resultIsStale, setResultIsStale] = useState(() => loadCachedResult() !== undefined)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [clearCacheConfirmOpen, setClearCacheConfirmOpen] = useState(false)
+  const [scanVersion, setScanVersion] = useState(0)
   const [loading, setLoading] = useState(false)
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null)
   const [error, setError] = useState('')
@@ -146,6 +137,14 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
     dragging: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0,
   })
   const fsWheelRef = useRef<HTMLDivElement>(null)
+
+  // Stable cache-busted image helpers — scanVersion changes after each scan
+  const bustKey = String(scanVersion)
+  const fileSrc = useCallback((path: string) => toFilePreviewSrc(path, bustKey), [bustKey])
+  const getThumbSrc = useCallback((issue: AuditIssue, size: 'tiny' | 'small' | 'medium'): string => {
+    const path = issue.thumbnailPaths?.[size] ?? (size === 'small' ? issue.thumbnailPath : undefined)
+    return path ? toFilePreviewSrc(path, bustKey) : ''
+  }, [bustKey])
 
   // Notify parent of cached result on mount
   useEffect(() => {
@@ -338,7 +337,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
 
   const runScan = async () => {
     if (!vaultPath.trim()) {
-      setError('请先选择仓库路径')
+      setError(tr.scanErrorNoVault)
       return
     }
 
@@ -351,10 +350,12 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
     })
 
     try {
-      const scanResult = await scanVault(vaultPath, { generateThumbs, thumbSize: 256 })
+      const prevIndex = result?.scanIndex
+      const scanResult = await scanVault(vaultPath, { generateThumbs, thumbSize: 256, prevIndex })
       setResult(scanResult)
       saveCachedResult(scanResult)
       setResultIsStale(false)
+      setScanVersion((v) => v + 1)
       onScanComplete?.(scanResult)
       setSelectedIssueIds(new Set())
       setAnchorIndex(null)
@@ -365,7 +366,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
     } catch (e) {
       setResult(undefined)
       saveCachedResult(undefined)
-      setError(e instanceof Error ? e.message : '扫描失败')
+      setError(e instanceof Error ? e.message : tr.scanErrorFailed)
     } finally {
       unlisten()
       setScanProgress(null)
@@ -429,7 +430,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
         return issue
       })
     if (selectedIssues.length === 0) {
-      setError('请先选择要修复的文件')
+      setError(tr.scanErrorNoSelection)
       setConfirmOpen(false)
       return
     }
@@ -442,42 +443,20 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
         policy,
       })
       setConfirmOpen(false)
-      setError(`修复完成：移动 ${summary.moved}，删除 ${summary.deleted}，跳过 ${summary.skipped}`)
+      setError(tr.scanFixComplete.replace('{moved}', String(summary.moved)).replace('{deleted}', String(summary.deleted)).replace('{skipped}', String(summary.skipped)))
       await runScan()
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       if (message.includes('CONFLICT')) {
-        const choice = window.confirm('检测到重名冲突。确定选择“覆盖”吗？取消将使用“改名共存”。')
+        const choice = window.confirm(tr.scanConflictPrompt)
         await runFixes(choice ? 'overwriteAll' : 'renameAll')
         return
       }
-      setError(`修复失败：${message}`)
+      setError(tr.scanFixFailed.replace('{message}', message))
     } finally {
       setFixing(false)
       await refreshOps()
     }
-  }
-
-  const handleUndoTask = async (taskId: string) => {
-    const summary = await invoke<UndoSummary>('undo_task', { taskId })
-    if (summary.warnings.length > 0) {
-      setError(summary.warnings.join('；'))
-    } else {
-      setError('任务撤回完成')
-    }
-    await runScan()
-    await refreshOps()
-  }
-
-  const handleUndoEntry = async (entryId: string) => {
-    const summary = await invoke<UndoSummary>('undo_entry', { entryId })
-    if (summary.warnings.length > 0) {
-      setError(summary.warnings.join('；'))
-    } else {
-      setError('文件撤回完成')
-    }
-    await runScan()
-    await refreshOps()
   }
 
   const handleOpenFile = async (path: string) => {
@@ -496,13 +475,17 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
     }
   }
 
-  const clearThumbnailCache = async () => {
-    const ok = window.confirm('将删除画廊缩略图缓存（.voyager-gallery-cache）下的所有文件，确定继续吗？')
-    if (!ok) return
+  const clearThumbnailCache = () => {
+    setClearCacheConfirmOpen(true)
+  }
 
+  const executeClearThumbnailCache = async () => {
+    setClearCacheConfirmOpen(false)
     try {
       const summary = await invoke<{ removed: number; cacheDir: string }>('clear_thumbnail_cache')
-      setError(`清除完成：已删除 ${summary.removed} 个缩略图（${summary.cacheDir}）`)
+      const realCount = Math.ceil(summary.removed / 3)
+      setScanVersion((v) => v + 1)
+      setError(tr.scanClearCacheDone.replace('{removed}', String(summary.removed)).replace('{cacheDir}', summary.cacheDir).replace('{realCount}', String(realCount)))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -522,9 +505,9 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
         : exportUtil.toMarkdown(issues)
     try {
       await invoke('write_text_file', { path, content })
-      setError(`导出完成：${path}`)
+      setError(tr.scanExportDone.replace('{path}', path))
     } catch (e) {
-      setError(`导出失败：${e instanceof Error ? e.message : String(e)}`)
+      setError(tr.scanExportFailed.replace('{message}', e instanceof Error ? e.message : String(e)))
     }
   }
 
@@ -533,12 +516,12 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
   }, [])
 
   const ctxMenuItems: MenuItem[] = ctxMenu ? [
-    { label: '打开文件', onClick: () => handleOpenFile(ctxMenu.issue.imagePath) },
-    { label: '打开目录', onClick: () => handleOpenFolder(ctxMenu.issue.imagePath) },
-    { label: '复制路径', onClick: () => { void navigator.clipboard.writeText(ctxMenu.issue.imagePath) } },
-    { label: '全屏查看', onClick: () => enterFullscreen(ctxMenu.issue) },
+    { label: tr.scanCtxOpenFile, onClick: () => handleOpenFile(ctxMenu.issue.imagePath) },
+    { label: tr.scanCtxOpenFolder, onClick: () => handleOpenFolder(ctxMenu.issue.imagePath) },
+    { label: tr.scanCtxCopyPath, onClick: () => { void navigator.clipboard.writeText(ctxMenu.issue.imagePath) } },
+    { label: tr.scanCtxFullscreen, onClick: () => enterFullscreen(ctxMenu.issue) },
     {
-      label: selectedIssueIds.has(ctxMenu.issue.id) ? '取消选中' : '选中',
+      label: selectedIssueIds.has(ctxMenu.issue.id) ? tr.scanCtxDeselect : tr.scanCtxSelect,
       onClick: () => {
         const id = ctxMenu.issue.id
         setSelectedIssueIds((prev) => {
@@ -579,13 +562,13 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
 
       {error && (
         <div style={{ padding: '4px 12px', fontSize: '0.78rem' }}>
-          <div className={error.includes('完成') ? 'alert alert-success' : 'alert alert-error'} role="alert" style={{ margin: 0 }}>{error}</div>
+          <div className={error.includes('完成') || error.includes('complete') || error.includes('Complete') || error.includes('cleared') || error.includes('Cleared') ? 'alert alert-success' : 'alert alert-error'} role="alert" style={{ margin: 0 }}>{error}</div>
         </div>
       )}
 
       {resultIsStale && result && (
         <div style={{ padding: '4px 12px', fontSize: '0.78rem', background: 'var(--warning-bg)', color: 'var(--text-muted)', borderBottom: '1px solid var(--warning-border)' }}>
-          当前展示的是上次的扫描结果。如果仓库内容已发生变化，建议重新扫描。
+          {tr.scanStaleResult}
         </div>
       )}
 
@@ -610,7 +593,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
             displayMode={displayMode}
             selectedIssueIds={selectedIssueIds}
             issueIndexMap={issueIndexMap}
-            toFilePreviewSrc={toFilePreviewSrc}
+            toFilePreviewSrc={fileSrc}
             getThumbSrc={getThumbSrc}
             onIssueClick={handleIssueRowClick}
             onPreviewClick={setGalleryActionIssue}
@@ -621,7 +604,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
         <DetailPanel
           issue={focusedIssue}
           selectedCount={selectedIssueIds.size}
-          toFilePreviewSrc={toFilePreviewSrc}
+          toFilePreviewSrc={fileSrc}
           getThumbSrc={getThumbSrc}
           onOpenFile={handleOpenFile}
           onOpenFolder={handleOpenFolder}
@@ -637,8 +620,6 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
         logs={logs}
         scanning={loading}
         tasks={tasks}
-        onUndoTask={handleUndoTask}
-        onUndoEntry={handleUndoEntry}
         onClearThumbnailCache={clearThumbnailCache}
       />
 
@@ -678,7 +659,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
                   background: 'var(--overlay-bg)', color: '#fff', border: 'none', borderRadius: '50%',
                   width: 44, height: 44, fontSize: 22, cursor: 'pointer', zIndex: 1001, display: 'grid', placeItems: 'center',
                 }}
-                aria-label="上一张"
+                aria-label={tr.scanPrevImage}
               >
                 ‹
               </button>
@@ -692,7 +673,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
                   background: 'var(--overlay-bg)', color: '#fff', border: 'none', borderRadius: '50%',
                   width: 44, height: 44, fontSize: 22, cursor: 'pointer', zIndex: 1001, display: 'grid', placeItems: 'center',
                 }}
-                aria-label="下一张"
+                aria-label={tr.scanNextImage}
               >
                 ›
               </button>
@@ -712,8 +693,8 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
                 {currentIdx + 1} / {currentList.length}
                 {previewZoom !== null && previewNaturalSize
                   ? ` · ${Math.round(previewZoom * 100)}%`
-                  : ' · 自适应'}
-                {' · 滚轮缩放 / 点击切换 / 拖拽平移'}
+                  : ` · ${tr.scanPreviewFit}`}
+                {` · ${tr.scanPreviewHint}`}
               </div>
               <div style={{ marginBottom: 16, textAlign: 'center' }}>
                 <div
@@ -743,7 +724,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
                   {(() => {
                     const imgSrc = displayMode === 'thumbnail' && (galleryActionIssue.thumbnailPaths || galleryActionIssue.thumbnailPath)
                       ? (getThumbSrc(galleryActionIssue, 'medium') || getThumbSrc(galleryActionIssue, 'small'))
-                      : toFilePreviewSrc(galleryActionIssue.imagePath)
+                      : fileSrc(galleryActionIssue.imagePath)
 
                     // Fit mode: image fits inside container with object-fit contain
                     // Zoom mode: image rendered at naturalWidth * zoom pixels
@@ -779,7 +760,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
                         onError={(e) => {
                           ;(e.currentTarget as HTMLImageElement).style.display = 'none'
                           const fallback = document.createElement('div')
-                          fallback.textContent = '无法加载图片'
+                          fallback.textContent = tr.scanPreviewLoadFailed
                           fallback.style.cssText = 'padding:24px;color:var(--text-muted);text-align:center'
                           ;(e.currentTarget as HTMLImageElement).parentElement?.appendChild(fallback)
                         }}
@@ -800,7 +781,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
                     setGalleryActionIssue(null)
                   }}
                 >
-                  打开文件
+                  {tr.scanPreviewOpenFile}
                 </button>
                 <button
                   type="button"
@@ -810,21 +791,21 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
                     setGalleryActionIssue(null)
                   }}
                 >
-                  打开目录
+                  {tr.scanPreviewOpenFolder}
                 </button>
                 <button
                   type="button"
                   className="btn btn-secondary"
                   onClick={() => enterFullscreen(galleryActionIssue)}
                 >
-                  全屏原图
+                  {tr.scanPreviewFullscreenRaw}
                 </button>
                 <button
                   type="button"
                   className="btn btn-secondary"
                   onClick={() => setPreviewZoom(null)}
                 >
-                  重置缩放
+                  {tr.scanPreviewResetZoom}
                 </button>
                 <button
                   type="button"
@@ -832,14 +813,14 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
                   onClick={() => setPreviewZoom(1)}
                   disabled={!previewNaturalSize}
                 >
-                  100% 原始尺寸
+                  {tr.scanPreviewOriginalSize}
                 </button>
                 <button
                   type="button"
                   className="btn btn-secondary"
                   onClick={() => { setGalleryActionIssue(null); setPreviewZoom(null); setPreviewNaturalSize(null) }}
                 >
-                  取消
+                  {tr.scanPreviewCancel}
                 </button>
               </div>
             </div>
@@ -880,13 +861,13 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
             }}>
               <div style={{ color: '#fff', fontSize: '0.85rem', opacity: 0.8 }}>
                 {fsIdx >= 0 ? `${fsIdx + 1} / ${currentList.length}` : ''}
-                {fsZoom !== null && fsNatural ? ` · ${Math.round(fsZoom * 100)}%` : ' · 自适应'}
-                <span style={{ marginLeft: 12, opacity: 0.6 }}>滚轮缩放 / 点击切换 / 拖拽平移 / 方向键切换</span>
+                {fsZoom !== null && fsNatural ? ` · ${Math.round(fsZoom * 100)}%` : ` · ${tr.scanFsAdaptive}`}
+                <span style={{ marginLeft: 12, opacity: 0.6 }}>{tr.scanFsHint}</span>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button type="button" onClick={() => setFsZoom(null)}
                   style={{ background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: '0.8rem' }}>
-                  自适应
+                  {tr.scanFsAdaptive}
                 </button>
                 <button type="button" onClick={() => setFsZoom(1)} disabled={!fsNatural}
                   style={{ background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: '0.8rem' }}>
@@ -894,7 +875,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
                 </button>
                 <button type="button" onClick={exitFullscreen}
                   style={{ background: 'rgba(255,80,80,0.6)', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 14px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
-                  退出全屏 (ESC)
+                  {tr.scanFsExitFullscreen}
                 </button>
               </div>
             </div>
@@ -929,7 +910,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
               onMouseLeave={() => { fsDragState.current.dragging = false }}
             >
               <img
-                src={toFilePreviewSrc(fullscreenIssue.imagePath)}
+                src={fileSrc(fullscreenIssue.imagePath)}
                 alt={fullscreenIssue.imagePath}
                 draggable={false}
                 style={imgStyle}
@@ -957,7 +938,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
                   background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', borderRadius: '50%',
                   width: 48, height: 48, fontSize: 24, cursor: 'pointer', zIndex: 10001, display: 'grid', placeItems: 'center',
                 }}
-                aria-label="上一张">‹</button>
+                aria-label={tr.scanPrevImage}>‹</button>
             )}
             {fsNext && (
               <button type="button"
@@ -967,7 +948,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
                   background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', borderRadius: '50%',
                   width: 48, height: 48, fontSize: 24, cursor: 'pointer', zIndex: 10001, display: 'grid', placeItems: 'center',
                 }}
-                aria-label="下一张">›</button>
+                aria-label={tr.scanNextImage}>›</button>
             )}
 
             {/* Bottom filename */}
@@ -984,13 +965,32 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
 
       <ConfirmDialog
         open={confirmOpen}
-        title={fixing ? '执行中，请稍候...' : '确认执行修复'}
+        title={fixing ? tr.scanConfirmTitleFixing : tr.scanConfirmTitle}
+        body={!fixing ? (
+          <div style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>
+            <p>{tr.scanConfirmBody1}</p>
+            <p>{tr.scanConfirmBody2}</p>
+          </div>
+        ) : undefined}
         onCancel={() => {
           if (!fixing) setConfirmOpen(false)
         }}
         onConfirm={() => {
           void runFixes()
         }}
+      />
+
+      <ConfirmDialog
+        open={clearCacheConfirmOpen}
+        title={tr.scanClearCacheConfirmTitle}
+        body={
+          <div style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>
+            <p>{tr.scanClearCacheConfirmBody}</p>
+            <p style={{ fontSize: '0.85em', opacity: 0.8 }}>{tr.scanClearCacheNote}</p>
+          </div>
+        }
+        onCancel={() => setClearCacheConfirmOpen(false)}
+        onConfirm={() => { void executeClearThumbnailCache() }}
       />
 
       {ctxMenu && (

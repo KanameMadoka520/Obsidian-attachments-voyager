@@ -17,10 +17,18 @@ pub struct ScanIssue {
     pub file_mtime: Option<u64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanIndex {
+    pub files: HashMap<String, u64>,
+    pub md_refs: HashMap<String, Vec<String>>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanResult {
     pub total_md: usize,
     pub total_images: usize,
     pub issues: Vec<ScanIssue>,
+    pub scan_index: ScanIndex,
 }

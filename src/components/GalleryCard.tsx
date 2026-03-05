@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import type { AuditIssue, GalleryDisplayMode } from '../types'
+import { useLang } from '../App'
 
 interface GalleryCardProps {
   issue: AuditIssue
@@ -24,6 +25,8 @@ const GalleryCard = memo(function GalleryCard({
   onPreviewClick,
   onContextMenu,
 }: GalleryCardProps) {
+  const tr = useLang()
+
   return (
     <label
       style={{
@@ -72,12 +75,12 @@ const GalleryCard = memo(function GalleryCard({
       >
         {displayMode === 'noImage' ? (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-            不显示图片
+            {tr.galleryNoImage}
           </div>
         ) : displayMode === 'rawImage' ? (
           <>
             <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-              加载中...
+              {tr.galleryLoading}
             </div>
             <img
               src={toFilePreviewSrc(issue.imagePath)}
@@ -89,7 +92,7 @@ const GalleryCard = memo(function GalleryCard({
               }}
               onError={(e) => {
                 const placeholder = (e.currentTarget as HTMLImageElement).previousElementSibling as HTMLElement | null
-                if (placeholder) placeholder.textContent = '图片加载失败'
+                if (placeholder) placeholder.textContent = tr.galleryLoadFailed
                 ;(e.currentTarget as HTMLImageElement).style.display = 'none'
               }}
               style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
@@ -110,7 +113,7 @@ const GalleryCard = memo(function GalleryCard({
                 boxSizing: 'border-box',
               }}
             >
-              {(issue.thumbnailPaths || issue.thumbnailPath) ? '缩略图加载失败' : '未生成缩略图'}
+              {(issue.thumbnailPaths || issue.thumbnailPath) ? tr.galleryThumbLoadFailed : tr.galleryNoThumb}
             </div>
             {(issue.thumbnailPaths || issue.thumbnailPath) && (
               <img
@@ -135,7 +138,7 @@ const GalleryCard = memo(function GalleryCard({
       </div>
       {issue.type === 'misplaced' && (
         <div style={{ marginTop: 4, fontSize: '0.78rem', color: 'var(--text-muted)', wordBreak: 'break-all', overflow: 'hidden', maxHeight: '2.4em', lineHeight: '1.2em' }}>
-          建议路径：{issue.suggestedTarget ?? '-'}
+          {tr.gallerySuggestedPath.replace('{path}', issue.suggestedTarget ?? '-')}
         </div>
       )}
     </label>

@@ -1,3 +1,4 @@
+import { useLang } from '../App'
 import type { AuditIssue } from '../types'
 
 interface IssueSelectModifier {
@@ -46,6 +47,7 @@ function IssuesTable({
   toFilePreviewSrc,
   onPreviewClick,
 }: IssuesTableProps) {
+  const tr = useLang()
   const selectedSet = new Set(selectedIssueIds)
   const trashDeleteSet = new Set(trashDeleteIds)
 
@@ -56,19 +58,19 @@ function IssuesTable({
         <table className="data-table">
           <thead>
             <tr>
-              <th style={{ width: '5%' }}>选择</th>
-              {toFilePreviewSrc && <th style={{ width: '60px' }}>预览</th>}
-              <th style={{ width: mode === 'orphan' ? '40%' : '22%' }}>图片路径</th>
-              {mode === 'misplaced' && <th style={{ width: '18%' }}>建议路径</th>}
-              {mode === 'misplaced' && <th style={{ width: '16%' }}>引用 Markdown</th>}
-              <th>操作</th>
+              <th style={{ width: '5%' }}>{tr.issuesColSelect}</th>
+              {toFilePreviewSrc && <th style={{ width: '60px' }}>{tr.issuesColPreview}</th>}
+              <th style={{ width: mode === 'orphan' ? '40%' : '22%' }}>{tr.issuesColImagePath}</th>
+              {mode === 'misplaced' && <th style={{ width: '18%' }}>{tr.issuesColSuggestedPath}</th>}
+              {mode === 'misplaced' && <th style={{ width: '16%' }}>{tr.issuesColRefMarkdown}</th>}
+              <th>{tr.issuesColActions}</th>
             </tr>
           </thead>
           <tbody>
             {issues.length === 0 ? (
               <tr>
                 <td colSpan={99} className="empty-state">
-                  当前类型暂无问题
+                  {tr.issuesEmpty}
                 </td>
               </tr>
             ) : (
@@ -123,7 +125,7 @@ function IssuesTable({
                           />
                         ) : (
                           <div style={{ width: 48, height: 48, borderRadius: 4, background: 'var(--placeholder-bg)', display: 'grid', placeItems: 'center', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                            无
+                            {tr.issuesNoPreview}
                           </div>
                         )}
                       </td>
@@ -151,7 +153,7 @@ function IssuesTable({
                               onOpenFile?.(issue.imagePath)
                             }}
                           >
-                            图片-打开文件
+                            {tr.issuesOpenImageFile}
                           </button>
                           <button
                             type="button"
@@ -161,7 +163,7 @@ function IssuesTable({
                               onOpenFolder?.(issue.imagePath)
                             }}
                           >
-                            图片-打开目录
+                            {tr.issuesOpenImageFolder}
                           </button>
                         </div>
                         {mode === 'misplaced' && issue.mdPath && (
@@ -174,7 +176,7 @@ function IssuesTable({
                                 onOpenMarkdownFile?.(issue.mdPath!)
                               }}
                             >
-                              Markdown-打开文件
+                              {tr.issuesOpenMarkdownFile}
                             </button>
                             <button
                               type="button"
@@ -184,7 +186,7 @@ function IssuesTable({
                                 onOpenMarkdownFolder?.(issue.mdPath!)
                               }}
                             >
-                              Markdown-打开目录
+                              {tr.issuesOpenMarkdownFolder}
                             </button>
                             {issue.reason.includes('trash') && (
                               <button
@@ -195,7 +197,7 @@ function IssuesTable({
                                   onToggleTrashDelete?.(issue.id)
                                 }}
                               >
-                                {trashDeleteSet.has(issue.id) ? '已选：删除图片' : '改为删除图片'}
+                                {trashDeleteSet.has(issue.id) ? tr.issuesTrashDeleteSelected : tr.issuesTrashDeleteChange}
                               </button>
                             )}
                           </div>

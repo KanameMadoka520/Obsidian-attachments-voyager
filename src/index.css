@@ -388,6 +388,21 @@ body {
   50% { opacity: 0.4; }
 }
 
+.status-bar-clear-btn {
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.status-bar-clear-btn:hover {
+  color: var(--danger-color);
+  border-color: var(--danger-color);
+}
+
 .status-toggle {
   font-size: 0.6rem;
   opacity: 0.5;
@@ -976,6 +991,22 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.title-bar-lang-btn {
+  padding: 2px 8px;
+  font-size: 0.7rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-color);
+  color: var(--text-main);
+  cursor: pointer;
+  outline: none;
+  line-height: 1.4;
+}
+
+.title-bar-lang-btn:hover {
+  background: var(--hover-bg);
 }
 
 .title-bar-theme {

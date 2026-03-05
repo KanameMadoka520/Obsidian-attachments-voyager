@@ -1,4 +1,5 @@
 import type { AuditIssue } from '../types'
+import { useLang } from '../App'
 
 interface DetailPanelProps {
   issue: AuditIssue | null
@@ -25,6 +26,8 @@ function DetailPanel({
   onOpenFolder,
   onFullscreen,
 }: DetailPanelProps) {
+  const tr = useLang()
+
   if (!issue && selectedCount <= 1) return null
 
   if (!issue && selectedCount > 1) {
@@ -32,7 +35,7 @@ function DetailPanel({
       <aside className="detail-panel">
         <div className="detail-panel-inner">
           <div className="detail-multi-select">
-            已选择 {selectedCount} 张图片
+            {tr.detailMultiSelect.replace('{count}', String(selectedCount))}
           </div>
         </div>
       </aside>
@@ -51,38 +54,38 @@ function DetailPanel({
         </div>
         <div className="detail-attrs">
           <div className="detail-row">
-            <span className="detail-label">文件名</span>
+            <span className="detail-label">{tr.detailFileName}</span>
             <span className="detail-value">{basename(issue.imagePath)}</span>
           </div>
           <div className="detail-row">
-            <span className="detail-label">路径</span>
+            <span className="detail-label">{tr.detailPath}</span>
             <span className="detail-value detail-value-path">{issue.imagePath}</span>
           </div>
           <div className="detail-row">
-            <span className="detail-label">类型</span>
+            <span className="detail-label">{tr.detailType}</span>
             <span className="detail-value">{issue.type}</span>
           </div>
           <div className="detail-row">
-            <span className="detail-label">原因</span>
+            <span className="detail-label">{tr.detailReason}</span>
             <span className="detail-value">{issue.reason}</span>
           </div>
           {issue.suggestedTarget && (
             <div className="detail-row">
-              <span className="detail-label">建议目标</span>
+              <span className="detail-label">{tr.detailSuggestedTarget}</span>
               <span className="detail-value detail-value-path">{issue.suggestedTarget}</span>
             </div>
           )}
           {issue.mdPath && (
             <div className="detail-row">
-              <span className="detail-label">引用笔记</span>
+              <span className="detail-label">{tr.detailRefNote}</span>
               <span className="detail-value detail-value-path">{issue.mdPath}</span>
             </div>
           )}
         </div>
         <div className="detail-actions">
-          <button type="button" className="btn-sm" onClick={() => onOpenFile?.(issue.imagePath)}>打开文件</button>
-          <button type="button" className="btn-sm" onClick={() => onOpenFolder?.(issue.imagePath)}>打开目录</button>
-          <button type="button" className="btn-sm" onClick={() => onFullscreen?.(issue)}>全屏查看</button>
+          <button type="button" className="btn-sm" onClick={() => onOpenFile?.(issue.imagePath)}>{tr.detailOpenFile}</button>
+          <button type="button" className="btn-sm" onClick={() => onOpenFolder?.(issue.imagePath)}>{tr.detailOpenFolder}</button>
+          <button type="button" className="btn-sm" onClick={() => onFullscreen?.(issue)}>{tr.detailFullscreen}</button>
         </div>
       </div>
     </aside>

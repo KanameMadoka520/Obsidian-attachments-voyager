@@ -1,10 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import TitleBar from './components/TitleBar'
+import { getTranslations } from './lib/i18n'
+import type { Translations } from './lib/i18n'
 import * as storage from './lib/storage'
 import MigratePage from './pages/MigratePage'
 import ScanPage from './pages/ScanPage'
 import StatsPage from './pages/StatsPage'
-import type { ConflictPolicy, ScanResult, ThemeMode } from './types'
+import type { ConflictPolicy, Lang, ScanResult, ThemeMode } from './types'
+
+export const LangContext = createContext<Translations>(getTranslations('zh'))
+export const useLang = () => useContext(LangContext)
 
 const SETTINGS_KEY = 'voyager-ui-settings-v1'
 
@@ -13,6 +18,7 @@ interface UiSettings {
   zoomScale: number
   conflictPolicy: ConflictPolicy
   theme: ThemeMode
+  lang: Lang
 }
 
 const DEFAULT_SETTINGS: UiSettings = {
@@ -20,6 +26,7 @@ const DEFAULT_SETTINGS: UiSettings = {
   zoomScale: 1,
   conflictPolicy: 'renameAll',
   theme: 'auto',
+  lang: 'zh',
 }
 
 function loadSettings(): UiSettings {
@@ -32,6 +39,7 @@ function loadSettings(): UiSettings {
       zoomScale: typeof parsed.zoomScale === 'number' ? parsed.zoomScale : 1,
       conflictPolicy: parsed.conflictPolicy ?? 'renameAll',
       theme: (['auto', 'light', 'dark', 'parchment'] as const).includes(parsed.theme as ThemeMode) ? parsed.theme as ThemeMode : 'auto',
+      lang: (['zh', 'en'] as const).includes(parsed.lang as Lang) ? parsed.lang as Lang : 'zh',
     }
   } catch {
     return DEFAULT_SETTINGS
@@ -96,25 +104,29 @@ function App() {
   if (!ready) return null
 
   return (
-    <div className="app-shell" style={rootStyle}>
-      <TitleBar
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        theme={settings.theme}
-        onThemeChange={(theme) => updateSettings({ theme })}
-      />
-      <div className="app-body">
-        {activeTab === 'scan' && (
-          <ScanPage conflictPolicy={settings.conflictPolicy} onScanComplete={setLastScanResult} />
-        )}
-        {activeTab === 'migrate' && (
-          <MigratePage conflictPolicy={settings.conflictPolicy} />
-        )}
-        {activeTab === 'stats' && (
-          <StatsPage result={lastScanResult} />
-        )}
+    <LangContext.Provider value={getTranslations(settings.lang)}>
+      <div className="app-shell" style={rootStyle}>
+        <TitleBar
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          theme={settings.theme}
+          onThemeChange={(theme) => updateSettings({ theme })}
+          lang={settings.lang}
+          onLangChange={(lang) => updateSettings({ lang })}
+        />
+        <div className="app-body">
+          {activeTab === 'scan' && (
+            <ScanPage conflictPolicy={settings.conflictPolicy} onScanComplete={setLastScanResult} />
+          )}
+          {activeTab === 'migrate' && (
+            <MigratePage conflictPolicy={settings.conflictPolicy} />
+          )}
+          {activeTab === 'stats' && (
+            <StatsPage result={lastScanResult} />
+          )}
+        </div>
       </div>
-    </div>
+    </LangContext.Provider>
   )
 }
 

@@ -1,3 +1,5 @@
+import { getTranslations } from './i18n'
+import type { Lang } from './i18n'
 import type { AuditIssue } from '../types'
 
 function formatSize(bytes?: number): string {
@@ -7,11 +9,11 @@ function formatSize(bytes?: number): string {
   return `${(bytes / 1048576).toFixed(1)} MB`
 }
 
-export function toJSON(issues: AuditIssue[]): string {
+export function toJSON(issues: AuditIssue[], _lang: Lang = 'zh'): string {
   return JSON.stringify(issues, null, 2)
 }
 
-export function toCSV(issues: AuditIssue[]): string {
+export function toCSV(issues: AuditIssue[], _lang: Lang = 'zh'): string {
   const header = 'id,type,imagePath,reason,suggestedTarget,mdPath,fileSize'
   const rows = issues.map((i) => {
     const fields = [
@@ -28,17 +30,18 @@ export function toCSV(issues: AuditIssue[]): string {
   return [header, ...rows].join('\n')
 }
 
-export function toMarkdown(issues: AuditIssue[]): string {
+export function toMarkdown(issues: AuditIssue[], lang: Lang = 'zh'): string {
+  const tr = getTranslations(lang)
   const lines: string[] = [
-    '# Voyager 扫描报告',
+    `# ${tr.exportReportTitle}`,
     '',
-    `共 ${issues.length} 个问题`,
+    tr.exportReportSummary.replace('{count}', String(issues.length)),
     '',
-    '| 类型 | 图片路径 | 大小 | 原因 | 建议目标 |',
+    `| ${tr.exportColType} | ${tr.exportColImagePath} | ${tr.exportColSize} | ${tr.exportColReason} | ${tr.exportColSuggestedTarget} |`,
     '|------|---------|------|------|---------|',
   ]
   for (const i of issues) {
-    const type = i.type === 'orphan' ? '孤立' : '错位'
+    const type = i.type === 'orphan' ? tr.exportTypeOrphan : tr.exportTypeMisplaced
     const size = formatSize(i.fileSize)
     const target = i.suggestedTarget ?? '-'
     lines.push(`| ${type} | ${i.imagePath} | ${size} | ${i.reason} | ${target} |`)
