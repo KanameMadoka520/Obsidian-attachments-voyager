@@ -97,7 +97,7 @@ npm run tauri:build
 - **React 19** + **TypeScript 5.9** + **Vite 7** + **Recharts 3.7**
 - 组件在 `src/components/`，页面在 `src/pages/`，工具库在 `src/lib/`
 - 测试在 `src/__tests__/`，使用 **Vitest** + **@testing-library/react** + **jsdom**
-- 全局样式在 `src/index.css`（约 1270 行），使用 CSS 变量实现四套主题
+- 全局样式在 `src/index.css`（约 1301 行），使用 CSS 变量实现四套主题
 - 与后端通信通过 `@tauri-apps/api` 的 `invoke()` 函数 + `listen()` 事件监听
 
 #### 前端关键文件
@@ -117,12 +117,12 @@ npm run tauri:build
 ### 后端（`src-tauri/src/`）
 
 - **Rust 2021 Edition** + **Tauri v1.5** + **Rayon 1.10**（多线程并行）
-- `main.rs`（557 行）：所有 Tauri 命令注册（`#[tauri::command]`），包含 `window.emit()` 进度推送
-- `scanner.rs`（240 行）：仓库扫描核心逻辑，Rayon `par_iter()` 并行缩略图生成
+- `main.rs`（415 行）：13 个 Tauri 命令注册（`#[tauri::command]`），包含 `window.emit()` 进度推送
+- `scanner.rs`（300 行）：仓库扫描核心逻辑，增量扫描 + Rayon `par_iter()` 并行缩略图生成
 - `parser.rs`：Markdown 图片链接提取（wiki link + 标准 markdown）
-- `models.rs`：`ScanIssue`、`ScanResult` 等数据结构（含 `file_mtime` 字段）
-- `ops_log.rs`（182 行）：操作历史 JSON 持久化
-- `thumb_cache.rs`（174 行）：三级 WebP 缩略图生成与缓存（哈希命名 + 一次打开多次缩放）
+- `models.rs`（34 行）：`ScanIssue`、`ScanResult`、`ScanIndex` 等数据结构
+- `ops_log.rs`（166 行）：操作历史 JSON 持久化（voyager-data/ops-history.json）
+- `thumb_cache.rs`（185 行）：三级 WebP 缩略图生成与缓存（哈希命名 + 级联缩放）
 
 ### 前后端通信
 
@@ -134,6 +134,7 @@ npm run tauri:build
 |------|------|
 | `scan_vault` | 扫描仓库，返回问题列表（接受 `window: tauri::Window` + `prev_index: Option<ScanIndex>` 增量扫描参数） |
 | `fix_issues` | 执行修复（移动/删除） |
+| `list_operation_history` | 获取操作历史列表（只读，从 JSON 文件加载） |
 | `execute_migration` | 笔记迁移 |
 | `open_file` / `open_file_parent` | 用系统程序打开文件/在文件管理器中显示 |
 | `clear_thumbnail_cache` | 清除全部缩略图缓存 |
