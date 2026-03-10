@@ -11,6 +11,7 @@ export default defineConfig({
     strictPort: true,
   },
   test: {
-    environment: 'jsdom'
+    environment: 'jsdom',
+    exclude: ['.worktrees/**', 'node_modules/**', 'dist/**'],
   }
 })

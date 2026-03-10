@@ -12,6 +12,7 @@ interface GalleryCardProps {
   onCardClick: (issueId: string, index: number, event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => void
   onPreviewClick: (issue: AuditIssue) => void
   onContextMenu?: (issue: AuditIssue, x: number, y: number) => void
+  readOnly?: boolean
 }
 
 const GalleryCard = memo(function GalleryCard({
@@ -24,8 +25,11 @@ const GalleryCard = memo(function GalleryCard({
   onCardClick,
   onPreviewClick,
   onContextMenu,
+  readOnly,
 }: GalleryCardProps) {
   const tr = useLang()
+
+  const smallThumbSrc = getThumbSrc(issue, 'small')
 
   return (
     <label
@@ -53,9 +57,11 @@ const GalleryCard = memo(function GalleryCard({
         }
       }}
     >
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
-        <input type="checkbox" readOnly checked={checked} />
-      </div>
+      {!readOnly && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+          <input type="checkbox" readOnly checked={checked} />
+        </div>
+      )}
       <div
         style={{
           position: 'relative',
@@ -73,7 +79,14 @@ const GalleryCard = memo(function GalleryCard({
           onPreviewClick(issue)
         }}
       >
-        {displayMode === 'noImage' ? (
+        {issue.type === 'broken' ? (
+          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', textAlign: 'center', padding: 8, boxSizing: 'border-box' }}>
+            <div>
+              <div style={{ fontSize: '1.5rem', marginBottom: 4, opacity: 0.7 }}>&#x26A0;</div>
+              <div>{issue.imagePath}</div>
+            </div>
+          </div>
+        ) : displayMode === 'noImage' ? (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
             {tr.galleryNoImage}
           </div>
@@ -113,11 +126,11 @@ const GalleryCard = memo(function GalleryCard({
                 boxSizing: 'border-box',
               }}
             >
-              {(issue.thumbnailPaths || issue.thumbnailPath) ? tr.galleryThumbLoadFailed : tr.galleryNoThumb}
+              {smallThumbSrc ? tr.galleryThumbLoadFailed : tr.galleryNoThumb}
             </div>
-            {(issue.thumbnailPaths || issue.thumbnailPath) && (
+            {smallThumbSrc && (
               <img
-                src={getThumbSrc(issue, 'small')}
+                src={smallThumbSrc}
                 alt={issue.imagePath}
                 loading="lazy"
                 onLoad={(e) => {
@@ -134,7 +147,7 @@ const GalleryCard = memo(function GalleryCard({
         )}
       </div>
       <div style={{ marginTop: 6, fontSize: '0.8rem', color: 'var(--text-muted)', wordBreak: 'break-all', overflow: 'hidden', maxHeight: '2.4em', lineHeight: '1.2em' }}>
-        {issue.imagePath}
+        {issue.type === 'broken' ? (issue.mdPath ?? issue.imagePath) : issue.imagePath}
       </div>
       {issue.type === 'misplaced' && (
         <div style={{ marginTop: 4, fontSize: '0.78rem', color: 'var(--text-muted)', wordBreak: 'break-all', overflow: 'hidden', maxHeight: '2.4em', lineHeight: '1.2em' }}>

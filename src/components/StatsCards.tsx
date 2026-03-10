@@ -1,36 +1,32 @@
-import type { ScanResult } from '../types'
+import { useLang } from '../App'
+import { formatSize } from '../lib/export'
 
 interface StatsCardsProps {
-  result?: ScanResult
+  totalImages: number
+  totalSize: number
+  filteredCount: number
 }
 
-function StatsCards({ result }: StatsCardsProps) {
-  const orphanCount = result?.issues.filter((i) => i.type === 'orphan').length ?? 0
-  const misplacedCount = result?.issues.filter((i) => i.type === 'misplaced').length ?? 0
+function StatsCards({ totalImages, totalSize, filteredCount }: StatsCardsProps) {
+  const tr = useLang()
 
   return (
-    <section className="stats-grid">
-      <div className="stat-item">
-        <div className="stat-label">Markdown 文件数</div>
-        <div className="stat-value">{result?.totalMd ?? '-'}</div>
+    <div className="gallery-stats-cards">
+      <div className="gallery-stat-card">
+        <span className="gallery-stat-value">{totalImages.toLocaleString()}</span>
+        <span className="gallery-stat-label">{tr.galleryStatsTotal}</span>
       </div>
-      <div className="stat-item">
-        <div className="stat-label">图片总数</div>
-        <div className="stat-value">{result?.totalImages ?? '-'}</div>
+      <div className="gallery-stat-card">
+        <span className="gallery-stat-value">{formatSize(totalSize)}</span>
+        <span className="gallery-stat-label">{tr.galleryStatsSize}</span>
       </div>
-      <div className="stat-item">
-        <div className="stat-label">未引用图片 (Orphan)</div>
-        <div className="stat-value" style={{ color: orphanCount > 0 ? 'var(--danger-color)' : '' }}>
-          {result ? orphanCount : '-'}
+      {filteredCount !== totalImages && (
+        <div className="gallery-stat-card">
+          <span className="gallery-stat-value">{filteredCount.toLocaleString()}</span>
+          <span className="gallery-stat-label">{tr.galleryStatsFiltered}</span>
         </div>
-      </div>
-      <div className="stat-item">
-        <div className="stat-label">错位图片 (Misplaced)</div>
-        <div className="stat-value" style={{ color: misplacedCount > 0 ? 'var(--danger-color)' : '' }}>
-          {result ? misplacedCount : '-'}
-        </div>
-      </div>
-    </section>
+      )}
+    </div>
   )
 }
 

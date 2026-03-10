@@ -13,6 +13,7 @@ import {
   CartesianGrid,
 } from 'recharts'
 import type { ScanResult, AuditIssue } from '../types'
+import { formatSize } from '../lib/export'
 
 interface StatsPageProps {
   result: ScanResult | null
@@ -22,12 +23,6 @@ const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#0088fe', '#00C49F'
 
 function getCSSVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function getParentDir(filePath: string): string {
@@ -56,15 +51,21 @@ export default function StatsPage({ result }: StatsPageProps) {
 
   const misplacedCount = useMemo(() => {
     if (!result) return 0
-    return result.issues.filter((i) => i.type !== 'orphan').length
+    return result.issues.filter((i) => i.type === 'misplaced').length
+  }, [result])
+
+  const brokenCount = useMemo(() => {
+    if (!result) return 0
+    return result.issues.filter((i) => i.type === 'broken').length
   }, [result])
 
   const issueTypePieData = useMemo(() => {
     return [
       { name: 'Orphan', value: orphanCount },
       { name: 'Misplaced', value: misplacedCount },
-    ]
-  }, [orphanCount, misplacedCount])
+      { name: 'Broken', value: brokenCount },
+    ].filter((d) => d.value > 0)
+  }, [orphanCount, misplacedCount, brokenCount])
 
   const fileTypePieData = useMemo(() => {
     if (!result) return []
@@ -157,6 +158,17 @@ export default function StatsPage({ result }: StatsPageProps) {
       .sort((a, b) => b.count - a.count)
   }, [result])
 
+  const healthScore = useMemo(() => {
+    if (!result || result.totalImages === 0) return null
+    const total = result.totalImages
+    const orphanRate = orphanCount / total
+    const misplacedRate = misplacedCount / total
+    const brokenRate = result.totalMd > 0 ? brokenCount / result.totalMd : 0
+    // Weighted score: orphan 40%, misplaced 30%, broken 30%
+    const penalty = orphanRate * 40 + misplacedRate * 30 + brokenRate * 30
+    return Math.max(0, Math.round(100 - penalty * 100))
+  }, [result, orphanCount, misplacedCount, brokenCount])
+
   if (!result) {
     return (
       <div className="stats-page" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
@@ -168,8 +180,46 @@ export default function StatsPage({ result }: StatsPageProps) {
   const textColor = getCSSVar('--text-main')
   const gridColor = getCSSVar('--border-color')
 
+  const orphanRate = result.totalImages > 0 ? (orphanCount / result.totalImages * 100).toFixed(1) : '0'
+  const misplacedRate = result.totalImages > 0 ? (misplacedCount / result.totalImages * 100).toFixed(1) : '0'
+  const brokenRate = result.totalMd > 0 ? (brokenCount / result.totalMd * 100).toFixed(1) : '0'
+
   return (
     <div className="stats-page" style={{ overflowY: 'auto' }}>
+      <div style={{ padding: '8px 0 12px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+        <p style={{ margin: '0 0 6px' }}>{tr.statsOverviewGuide}</p>
+        <p style={{ margin: 0 }}>{tr.statsHealthGuide}</p>
+      </div>
+      {/* 0. Health Score */}
+      {healthScore !== null && (
+        <div className="stats-section">
+          <h3 className="stats-section-title">{tr.healthScoreTitle}</h3>
+          <div className="stats-cards">
+            <div className="stats-card" style={{ minWidth: 160 }}>
+              <div className="stats-card-value" style={{
+                fontSize: '2.5rem',
+                color: healthScore >= 80 ? 'var(--success-color, #4caf50)' : healthScore >= 50 ? 'var(--warning-color, #ff9800)' : 'var(--danger-color, #f44336)',
+              }}>
+                {healthScore}
+              </div>
+              <div className="stats-card-label">{tr.healthScoreLabel}</div>
+            </div>
+            <div className="stats-card">
+              <div className="stats-card-value">{orphanRate}%</div>
+              <div className="stats-card-label">{tr.healthOrphanRate}</div>
+            </div>
+            <div className="stats-card">
+              <div className="stats-card-value">{misplacedRate}%</div>
+              <div className="stats-card-label">{tr.healthMisplacedRate}</div>
+            </div>
+            <div className="stats-card">
+              <div className="stats-card-value">{brokenRate}%</div>
+              <div className="stats-card-label">{tr.healthBrokenRate}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 1. Overview Cards */}
       <div className="stats-section">
         <h3 className="stats-section-title">{tr.statsOverview}</h3>
@@ -187,8 +237,8 @@ export default function StatsPage({ result }: StatsPageProps) {
             <div className="stats-card-label">{tr.statsIssueCount}</div>
           </div>
           <div className="stats-card">
-            <div className="stats-card-value">{orphanCount} / {misplacedCount}</div>
-            <div className="stats-card-label">{tr.statsOrphanMisplaced}</div>
+            <div className="stats-card-value">{orphanCount} / {misplacedCount} / {brokenCount}</div>
+            <div className="stats-card-label">{tr.statsOrphanMisplacedBroken}</div>
           </div>
         </div>
       </div>
@@ -312,7 +362,7 @@ export default function StatsPage({ result }: StatsPageProps) {
               {duplicateFiles.map((dup, idx) => (
                 <tr key={idx}>
                   <td>{dup.filename}</td>
-                  <td>{formatFileSize(dup.fileSize)}</td>
+                  <td>{formatSize(dup.fileSize)}</td>
                   <td>{dup.count}</td>
                   <td>
                     <ul>

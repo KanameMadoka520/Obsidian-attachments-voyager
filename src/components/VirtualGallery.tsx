@@ -16,6 +16,8 @@ interface VirtualGalleryProps {
   onIssueClick: (issueId: string, index: number, event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => void
   onPreviewClick: (issue: AuditIssue) => void
   onContextMenu?: (issue: AuditIssue, x: number, y: number) => void
+  readOnly?: boolean
+  fillHeight?: boolean
 }
 
 function VirtualGallery({
@@ -28,6 +30,8 @@ function VirtualGallery({
   onIssueClick,
   onPreviewClick,
   onContextMenu,
+  readOnly,
+  fillHeight,
 }: VirtualGalleryProps) {
   const parentRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(800)
@@ -67,7 +71,7 @@ function VirtualGallery({
     <div
       ref={parentRef}
       style={{
-        height: Math.min(600, rowCount * ROW_HEIGHT + 20),
+        height: fillHeight ? '100%' : Math.min(600, rowCount * ROW_HEIGHT + 20),
         overflow: 'auto',
       }}
     >
@@ -107,6 +111,7 @@ function VirtualGallery({
                   onCardClick={onIssueClick}
                   onPreviewClick={onPreviewClick}
                   onContextMenu={onContextMenu}
+                  readOnly={readOnly}
                 />
               ))}
             </div>

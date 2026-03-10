@@ -26,6 +26,12 @@ pub struct MultiThumbnailResult {
 
 pub const SIZES: &[(&str, u32)] = &[("tiny", 64), ("small", 256), ("medium", 1024)];
 
+#[derive(Debug, Clone, Copy)]
+enum CacheScope {
+    Issue,
+    All,
+}
+
 fn exe_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -33,12 +39,19 @@ fn exe_dir() -> PathBuf {
         .unwrap_or_else(|| std::env::temp_dir())
 }
 
-fn cache_dir() -> PathBuf {
-    exe_dir().join(".voyager-gallery-cache")
+fn cache_dir_with_scope(scope: CacheScope) -> PathBuf {
+    match scope {
+        CacheScope::Issue => exe_dir().join(".voyager-gallery-cache"),
+        CacheScope::All => exe_dir().join(".voyager-gallery-cache-all"),
+    }
 }
 
-fn cache_dir_for_size(label: &str) -> PathBuf {
-    cache_dir().join(label)
+fn cache_dir() -> PathBuf {
+    cache_dir_with_scope(CacheScope::Issue)
+}
+
+fn cache_dir_for_size_with_scope(scope: CacheScope, label: &str) -> PathBuf {
+    cache_dir_with_scope(scope).join(label)
 }
 
 fn hashed_name(path: &str) -> String {
@@ -48,11 +61,15 @@ fn hashed_name(path: &str) -> String {
 }
 
 pub fn cache_root_path_string() -> String {
-    cache_dir().to_string_lossy().to_string()
+    cache_dir_with_scope(CacheScope::Issue).to_string_lossy().to_string()
 }
 
-pub fn clear_cache() -> Result<usize> {
-    let root = cache_dir();
+pub fn cache_root_path_string_all() -> String {
+    cache_dir_with_scope(CacheScope::All).to_string_lossy().to_string()
+}
+
+fn clear_cache_with_scope(scope: CacheScope) -> Result<usize> {
+    let root = cache_dir_with_scope(scope);
     if !root.exists() {
         return Ok(0);
     }
@@ -83,6 +100,14 @@ pub fn clear_cache() -> Result<usize> {
     }
 
     Ok(count)
+}
+
+pub fn clear_cache() -> Result<usize> {
+    clear_cache_with_scope(CacheScope::Issue)
+}
+
+pub fn clear_cache_all() -> Result<usize> {
+    clear_cache_with_scope(CacheScope::All)
 }
 
 pub fn generate_thumbnail(original_path: &str, max_edge: u32) -> Result<ThumbnailResult> {
@@ -117,6 +142,34 @@ pub fn generate_thumbnail(original_path: &str, max_edge: u32) -> Result<Thumbnai
 }
 
 pub fn generate_thumbnail_multi(original_path: &str, sizes: &[(&str, u32)]) -> Result<MultiThumbnailResult> {
+    generate_thumbnail_multi_with_scope(original_path, sizes, CacheScope::Issue)
+}
+
+pub fn generate_thumbnail_multi_all(original_path: &str, sizes: &[(&str, u32)]) -> Result<MultiThumbnailResult> {
+    generate_thumbnail_multi_with_scope(original_path, sizes, CacheScope::All)
+}
+
+pub fn get_thumbnail_paths_all(paths: &[String], sizes: &[(&str, u32)]) -> HashMap<String, HashMap<String, String>> {
+    let mut result = HashMap::new();
+    for original_path in paths {
+        let filename = hashed_name(original_path);
+        let mut size_map = HashMap::new();
+        for (label, _) in sizes {
+            let thumb_path = cache_dir_for_size_with_scope(CacheScope::All, label).join(&filename);
+            if thumb_path.exists() {
+                size_map.insert(label.to_string(), thumb_path.to_string_lossy().to_string());
+            }
+        }
+        result.insert(original_path.clone(), size_map);
+    }
+    result
+}
+
+fn generate_thumbnail_multi_with_scope(
+    original_path: &str,
+    sizes: &[(&str, u32)],
+    scope: CacheScope,
+) -> Result<MultiThumbnailResult> {
     let original = Path::new(original_path);
     if !original.exists() {
         anyhow::bail!("无法找到该文件，请自行检查");
@@ -129,7 +182,7 @@ pub fn generate_thumbnail_multi(original_path: &str, sizes: &[(&str, u32)]) -> R
     let mut paths: HashMap<String, String> = HashMap::new();
 
     for (label, _) in sizes {
-        let dir = cache_dir_for_size(label);
+        let dir = cache_dir_for_size_with_scope(scope, label);
         let thumb_path = dir.join(&filename);
         if thumb_path.exists() {
             paths.insert(label.to_string(), thumb_path.to_string_lossy().to_string());
@@ -158,7 +211,7 @@ pub fn generate_thumbnail_multi(original_path: &str, sizes: &[(&str, u32)]) -> R
     let mut prev_thumb: Option<DynamicImage> = None;
 
     for (label, max_edge) in &sizes_desc {
-        let dir = cache_dir_for_size(label);
+        let dir = cache_dir_for_size_with_scope(scope, label);
         let thumb_path = dir.join(&filename);
 
         if thumb_path.exists() {

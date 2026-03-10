@@ -6,6 +6,8 @@ import * as storage from './lib/storage'
 import MigratePage from './pages/MigratePage'
 import ScanPage from './pages/ScanPage'
 import StatsPage from './pages/StatsPage'
+import GalleryPage from './pages/GalleryPage'
+import HelpPage from './pages/HelpPage'
 import type { ConflictPolicy, Lang, ScanResult, ThemeMode } from './types'
 
 export const LangContext = createContext<Translations>(getTranslations('zh'))
@@ -57,9 +59,20 @@ function applyTheme(mode: ThemeMode) {
 
 function App() {
   const [ready, setReady] = useState(false)
-  const [activeTab, setActiveTab] = useState<'scan' | 'migrate' | 'stats'>('scan')
+  const [activeTab, setActiveTab] = useState<'scan' | 'migrate' | 'stats' | 'gallery' | 'help'>('scan')
   const [lastScanResult, setLastScanResult] = useState<ScanResult | null>(null)
+  const [lastVaultPath, setLastVaultPath] = useState('')
   const [settings, setSettings] = useState<UiSettings>(DEFAULT_SETTINGS)
+
+  const handleScanComplete = (result: ScanResult, vaultPath: string) => {
+    setLastVaultPath(vaultPath)
+    setLastScanResult((prev) => {
+      if (!result.allImages && prev?.allImages) {
+        return { ...result, allImages: prev.allImages }
+      }
+      return result
+    })
+  }
 
   useEffect(() => {
     storage.initStorage().then(() => {
@@ -116,13 +129,19 @@ function App() {
         />
         <div className="app-body">
           {activeTab === 'scan' && (
-            <ScanPage conflictPolicy={settings.conflictPolicy} onScanComplete={setLastScanResult} />
+            <ScanPage conflictPolicy={settings.conflictPolicy} onScanComplete={handleScanComplete} />
           )}
           {activeTab === 'migrate' && (
             <MigratePage conflictPolicy={settings.conflictPolicy} />
           )}
           {activeTab === 'stats' && (
             <StatsPage result={lastScanResult} />
+          )}
+          {activeTab === 'gallery' && (
+            <GalleryPage result={lastScanResult} vaultPath={lastVaultPath} />
+          )}
+          {activeTab === 'help' && (
+            <HelpPage />
           )}
         </div>
       </div>
