@@ -4,8 +4,8 @@ import { useLang } from '../App'
 import type { Lang, ThemeMode } from '../types'
 
 interface TitleBarProps {
-  activeTab: 'scan' | 'migrate' | 'stats'
-  onTabChange: (tab: 'scan' | 'migrate' | 'stats') => void
+  activeTab: 'scan' | 'migrate' | 'stats' | 'gallery' | 'help'
+  onTabChange: (tab: 'scan' | 'migrate' | 'stats' | 'gallery' | 'help') => void
   theme: ThemeMode
   onThemeChange: (theme: ThemeMode) => void
   lang: Lang
@@ -57,6 +57,20 @@ function TitleBar({ activeTab, onTabChange, theme, onThemeChange, lang, onLangCh
             onClick={() => onTabChange('stats')}
           >
             {tr.tabStats}
+          </button>
+          <button
+            type="button"
+            className={`title-bar-tab ${activeTab === 'gallery' ? 'active' : ''}`}
+            onClick={() => onTabChange('gallery')}
+          >
+            {tr.tabGallery}
+          </button>
+          <button
+            type="button"
+            className={`title-bar-tab ${activeTab === 'help' ? 'active' : ''}`}
+            onClick={() => onTabChange('help')}
+          >
+            {tr.tabHelp}
           </button>
         </nav>
       </div>

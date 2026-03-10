@@ -53,6 +53,9 @@ function StatusBar({
       </div>
       {expanded && (
         <div className="status-bar-drawer">
+          <div style={{ padding: '8px 12px 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+            {tr.statusGuide}
+          </div>
           <div className="drawer-tabs">
             <button
               type="button"

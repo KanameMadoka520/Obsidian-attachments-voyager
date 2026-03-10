@@ -14,7 +14,7 @@ pub struct MigrateSummary {
     pub entries: Vec<OperationEntry>,
 }
 
-fn conflict_target(target: &Path, policy: &ConflictPolicy) -> Result<PathBuf> {
+pub fn conflict_target(target: &Path, policy: &ConflictPolicy) -> Result<PathBuf> {
     if !target.exists() {
         return Ok(target.to_path_buf());
     }

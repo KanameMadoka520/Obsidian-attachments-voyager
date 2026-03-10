@@ -19,6 +19,10 @@ interface ToolbarProps {
   onClearSelection: () => void
   onFix: () => void
   onExport?: (format: 'json' | 'csv' | 'markdown') => void
+  onBackup?: (mode: 'directory' | 'zip') => void
+  onBackupAll?: (mode: 'directory' | 'zip') => void
+  onFindDuplicates?: () => void
+  onConvert?: () => void
   generateThumbs: boolean
   onGenerateThumbsChange: (v: boolean) => void
 }
@@ -28,12 +32,17 @@ function Toolbar({
   onScan, scanning, fixing,
   displayMode, onDisplayModeChange,
   hasResult, selectedCount, totalCount,
-  onSelectAll, onClearSelection, onFix, onExport,
+  onSelectAll, onClearSelection, onFix, onExport, onBackup,
+  onBackupAll, onFindDuplicates, onConvert,
   generateThumbs, onGenerateThumbsChange,
 }: ToolbarProps) {
   const tr = useLang()
   const [exportOpen, setExportOpen] = useState(false)
   const exportRef = useRef<HTMLDivElement>(null)
+  const [backupOpen, setBackupOpen] = useState(false)
+  const backupRef = useRef<HTMLDivElement>(null)
+  const [backupAllOpen, setBackupAllOpen] = useState(false)
+  const backupAllRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!exportOpen) return
@@ -45,6 +54,28 @@ function Toolbar({
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [exportOpen])
+
+  useEffect(() => {
+    if (!backupOpen) return
+    const handler = (e: MouseEvent) => {
+      if (backupRef.current && !backupRef.current.contains(e.target as Node)) {
+        setBackupOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [backupOpen])
+
+  useEffect(() => {
+    if (!backupAllOpen) return
+    const handler = (e: MouseEvent) => {
+      if (backupAllRef.current && !backupAllRef.current.contains(e.target as Node)) {
+        setBackupAllOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [backupAllOpen])
 
   const displayModeLabels: Record<GalleryDisplayMode, string> = {
     thumbnail: tr.toolbarDisplayThumbnail,
@@ -133,6 +164,70 @@ function Toolbar({
                     </div>
                   )}
                 </div>
+              </>
+            )}
+
+            {onBackup && selectedCount > 0 && (
+              <>
+                <div className="toolbar-sep" />
+                <div className="export-dropdown-wrap" ref={backupRef}>
+                  <button type="button" className="btn-sm" onClick={() => setBackupOpen(!backupOpen)}>
+                    {tr.toolbarBackup}
+                  </button>
+                  {backupOpen && (
+                    <div className="export-dropdown">
+                      <button type="button" className="export-dropdown-item"
+                        onClick={() => { onBackup('directory'); setBackupOpen(false) }}>
+                        {tr.toolbarBackupToDir}
+                      </button>
+                      <button type="button" className="export-dropdown-item"
+                        onClick={() => { onBackup('zip'); setBackupOpen(false) }}>
+                        {tr.toolbarBackupToZip}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {onBackupAll && (
+              <>
+                <div className="toolbar-sep" />
+                <div className="export-dropdown-wrap" ref={backupAllRef}>
+                  <button type="button" className="btn-sm" onClick={() => setBackupAllOpen(!backupAllOpen)}>
+                    {tr.toolbarBackupAll}
+                  </button>
+                  {backupAllOpen && (
+                    <div className="export-dropdown">
+                      <button type="button" className="export-dropdown-item"
+                        onClick={() => { onBackupAll('directory'); setBackupAllOpen(false) }}>
+                        {tr.toolbarBackupAllToDir}
+                      </button>
+                      <button type="button" className="export-dropdown-item"
+                        onClick={() => { onBackupAll('zip'); setBackupAllOpen(false) }}>
+                        {tr.toolbarBackupAllToZip}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {onFindDuplicates && (
+              <>
+                <div className="toolbar-sep" />
+                <button type="button" className="btn-sm" onClick={onFindDuplicates}>
+                  {tr.dupFindButton}
+                </button>
+              </>
+            )}
+
+            {onConvert && (
+              <>
+                <div className="toolbar-sep" />
+                <button type="button" className="btn-sm" onClick={onConvert}>
+                  {tr.convertButton}
+                </button>
               </>
             )}
           </>

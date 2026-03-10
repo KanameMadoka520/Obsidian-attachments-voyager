@@ -1,6 +1,6 @@
 export type Lang = 'zh' | 'en'
 
-export type IssueType = 'orphan' | 'misplaced' | 'multi_ref_conflict' | 'target_conflict'
+export type IssueType = 'orphan' | 'misplaced' | 'broken' | 'multi_ref_conflict' | 'target_conflict'
 
 export interface AuditIssue {
   id: string
@@ -20,11 +20,41 @@ export interface ScanIndex {
   mdRefs: Record<string, string[]>
 }
 
+export interface AttachmentInfo {
+  path: string
+  fileName: string
+  fileSize: number
+  fileMtime: number
+}
+
 export interface ScanResult {
   totalMd: number
   totalImages: number
   issues: AuditIssue[]
   scanIndex: ScanIndex
+  allImages?: AttachmentInfo[]
+}
+
+export interface DuplicateFile {
+  absPath: string
+  fileSize: number
+  refCount: number
+}
+
+export interface DuplicateGroup {
+  hash: string
+  files: DuplicateFile[]
+}
+
+export interface MergeSummary {
+  updatedMds: number
+  deletedFiles: number
+}
+
+export interface ConvertSummary {
+  converted: number
+  skipped: number
+  savedBytes: number
 }
 
 export type GalleryDisplayMode = 'thumbnail' | 'rawImage' | 'noImage'

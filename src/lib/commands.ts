@@ -15,3 +15,11 @@ export async function scanVault(root: string, options: ScanVaultOptions = {}): P
     prev_index: options.prevIndex ?? null,
   })
 }
+
+export async function openVaultFile(path: string, vaultPath: string): Promise<void> {
+  await invoke('open_file', { path, vaultPath })
+}
+
+export async function openVaultFileParent(path: string, vaultPath: string): Promise<void> {
+  await invoke('open_file_parent', { path, vaultPath })
+}

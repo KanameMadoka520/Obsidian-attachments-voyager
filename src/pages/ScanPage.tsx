@@ -14,10 +14,12 @@ import StatusBar from '../components/StatusBar'
 import Toolbar from '../components/Toolbar'
 import VirtualGallery from '../components/VirtualGallery'
 import { FILE_TYPE_GROUPS } from '../components/Sidebar'
-import type { AuditIssue, ConflictPolicy, GalleryDisplayMode, OperationTask, RuntimeLogLine, ScanResult, SizeFilter } from '../types'
-import { scanVault } from '../lib/commands'
+import type { AuditIssue, ConflictPolicy, ConvertSummary, DuplicateGroup, GalleryDisplayMode, MergeSummary, OperationTask, RuntimeLogLine, ScanResult, SizeFilter } from '../types'
+import { scanVault, openVaultFile, openVaultFileParent } from '../lib/commands'
+import { filterIssues, type FilterParams, getExtGroupKey } from '../lib/filterUtils'
 import * as exportUtil from '../lib/export'
 import * as storage from '../lib/storage'
+import FilterWorker from '../workers/filterWorker?worker'
 
 interface ScanProgress {
   phase: 'collecting' | 'parsing' | 'thumbnails'
@@ -34,13 +36,13 @@ interface FixSummary {
 
 interface ScanPageProps {
   conflictPolicy: ConflictPolicy
-  onScanComplete?: (result: ScanResult) => void
+  onScanComplete?: (result: ScanResult, vaultPath: string) => void
 }
 
 const RECENT_VAULTS_KEY = 'voyager-recent-vaults-v1'
 const DISPLAY_MODE_KEY = 'voyager-display-mode-v1'
 const LAST_VAULT_KEY = 'voyager-last-vault-v1'
-const CACHED_RESULT_KEY = 'voyager-cached-scan-result-v4'
+const CACHED_RESULT_KEY = 'voyager-cached-scan-result-v5'
 
 function loadDisplayMode(): GalleryDisplayMode {
   const raw = storage.getItem(DISPLAY_MODE_KEY)
@@ -87,7 +89,9 @@ function saveCachedResult(result: ScanResult | undefined) {
   if (!result) {
     storage.removeItem(CACHED_RESULT_KEY)
   } else {
-    storage.setItem(CACHED_RESULT_KEY, JSON.stringify(result))
+    // Exclude allImages from cache to control localStorage size
+    const { allImages: _, ...cacheable } = result
+    storage.setItem(CACHED_RESULT_KEY, JSON.stringify(cacheable))
   }
 }
 
@@ -114,7 +118,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
   const [tasks, setTasks] = useState<OperationTask[]>([])
   const [selectedIssueIds, setSelectedIssueIds] = useState<Set<string>>(new Set())
   const [anchorIndex, setAnchorIndex] = useState<number | null>(null)
-  const [galleryTab, setGalleryTab] = useState<'orphan' | 'misplaced'>('orphan')
+  const [galleryTab, setGalleryTab] = useState<'orphan' | 'misplaced' | 'broken'>('orphan')
   const [searchText, setSearchText] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -137,6 +141,25 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
     dragging: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0,
   })
   const fsWheelRef = useRef<HTMLDivElement>(null)
+  const [renameIssue, setRenameIssue] = useState<AuditIssue | null>(null)
+  const [renameNewName, setRenameNewName] = useState('')
+  const [renaming, setRenaming] = useState(false)
+
+  // Feature: Duplicate detection
+  const [dupGroups, setDupGroups] = useState<DuplicateGroup[] | null>(null)
+  const [dupFinding, setDupFinding] = useState(false)
+  const [dupKeepMap, setDupKeepMap] = useState<Record<string, string>>({}) // hash -> absPath to keep
+  const [dupMerging, setDupMerging] = useState(false)
+
+  // Feature: Convert format
+  const [convertOpen, setConvertOpen] = useState(false)
+  const [convertFormat, setConvertFormat] = useState<'webp' | 'jpeg'>('webp')
+  const [convertQuality, setConvertQuality] = useState(80)
+  const [convertScope, setConvertScope] = useState<'all' | 'selected'>('all')
+  const [converting, setConverting] = useState(false)
+
+  // Sidebar search ref for Ctrl+F focus
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
 
   // Stable cache-busted image helpers — scanVersion changes after each scan
   const bustKey = String(scanVersion)
@@ -148,7 +171,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
 
   // Notify parent of cached result on mount
   useEffect(() => {
-    if (result) onScanComplete?.(result)
+    if (result) onScanComplete?.(result, vaultPath)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -248,58 +271,88 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
 
   const allIssues = result?.issues ?? []
 
-  // Build extension-to-group-key lookup
+  // Build extension-to-group-key lookup (Record for Worker compat)
   const extGroupMap = useMemo(() => {
-    const map = new Map<string, string>()
+    const map: Record<string, string> = {}
     for (const g of FILE_TYPE_GROUPS) {
-      for (const ext of g.extensions) map.set(ext, g.key)
+      for (const ext of g.extensions) map[ext] = g.key
     }
     return map
   }, [])
 
-  const getExtGroupKey = useCallback((path: string) => {
-    const dot = path.lastIndexOf('.')
-    if (dot < 0) return 'other'
-    const ext = path.slice(dot + 1).toLowerCase()
-    return extGroupMap.get(ext) ?? 'other'
-  }, [extGroupMap])
-
-  // Compute type counts (before filtering by type/size, so counts stay stable)
   const typeCounts = useMemo(() => {
     const counts: Record<string, number> = {}
     for (const issue of allIssues) {
-      const key = getExtGroupKey(issue.imagePath)
+      const key = getExtGroupKey(issue.imagePath, extGroupMap)
       counts[key] = (counts[key] ?? 0) + 1
     }
     return counts
-  }, [allIssues, getExtGroupKey])
+  }, [allIssues, extGroupMap])
 
-  const matchesSize = useCallback((issue: AuditIssue) => {
-    if (sizeFilter === 'all') return true
-    const size = issue.fileSize
-    if (size == null) return true // no size info → show anyway
-    if (sizeFilter === 'small') return size < 102400
-    if (sizeFilter === 'medium') return size >= 102400 && size <= 1048576
-    return size > 1048576
-  }, [sizeFilter])
+  // --- Hybrid sync/Worker filtering ---
+  const WORKER_THRESHOLD = 5000
+  const workerRef = useRef<Worker | null>(null)
+  const workerReqIdRef = useRef(0)
+  const [workerPending, setWorkerPending] = useState(false)
+  const [workerFilteredIssues, setWorkerFilteredIssues] = useState<AuditIssue[] | null>(null)
 
-  const issues = useMemo(() => {
-    let filtered = allIssues
-    if (debouncedSearch) {
-      const lower = debouncedSearch.toLowerCase()
-      filtered = filtered.filter((i) => i.imagePath.toLowerCase().includes(lower))
+  useEffect(() => {
+    try {
+      const w = new FilterWorker()
+      w.onmessage = (e: MessageEvent<{ requestId?: number; issues: AuditIssue[] }>) => {
+        if (e.data.requestId !== workerReqIdRef.current) return
+        setWorkerPending(false)
+        setWorkerFilteredIssues(e.data.issues)
+      }
+      workerRef.current = w
+      return () => w.terminate()
+    } catch {
+      // Worker not available (e.g. jsdom test environment) — sync fallback only
     }
-    if (fileTypeFilter.size < FILE_TYPE_GROUPS.length) {
-      filtered = filtered.filter((i) => fileTypeFilter.has(getExtGroupKey(i.imagePath)))
+  }, [])
+
+  // Sync path (small datasets, or when Worker unavailable)
+  const syncFilteredIssues = useMemo(() => {
+    if (allIssues.length >= WORKER_THRESHOLD && workerRef.current) return null
+    return filterIssues({
+      issues: allIssues,
+      search: debouncedSearch,
+      fileTypeFilter: Array.from(fileTypeFilter),
+      totalTypeGroups: FILE_TYPE_GROUPS.length,
+      sizeFilter,
+      extGroupMap,
+    })
+  }, [allIssues, debouncedSearch, fileTypeFilter, sizeFilter, extGroupMap])
+
+  // Worker path (large datasets)
+  useEffect(() => {
+    if (allIssues.length < WORKER_THRESHOLD) {
+      setWorkerPending(false)
+      setWorkerFilteredIssues(null)
+      return
     }
-    if (sizeFilter !== 'all') {
-      filtered = filtered.filter(matchesSize)
+    const params: FilterParams = {
+      requestId: workerReqIdRef.current + 1,
+      issues: allIssues,
+      search: debouncedSearch,
+      fileTypeFilter: Array.from(fileTypeFilter),
+      totalTypeGroups: FILE_TYPE_GROUPS.length,
+      sizeFilter,
+      extGroupMap,
     }
-    return filtered
-  }, [allIssues, debouncedSearch, fileTypeFilter, sizeFilter, getExtGroupKey, matchesSize])
+    workerReqIdRef.current = params.requestId ?? workerReqIdRef.current
+    setWorkerPending(true)
+    workerRef.current?.postMessage(params)
+  }, [allIssues, debouncedSearch, fileTypeFilter, sizeFilter, extGroupMap])
+
+  const useWorker = allIssues.length >= WORKER_THRESHOLD && workerRef.current !== null
+  const issues = useWorker
+    ? (workerFilteredIssues ?? syncFilteredIssues ?? allIssues)
+    : (syncFilteredIssues ?? allIssues)
 
   const orphanIssues = issues.filter((i) => i.type === 'orphan')
   const misplacedIssues = issues.filter((i) => i.type === 'misplaced')
+  const brokenIssues = issues.filter((i) => i.type === 'broken')
 
   const issueIndexMap = useMemo(() => {
     const map = new Map<string, number>()
@@ -356,7 +409,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
       saveCachedResult(scanResult)
       setResultIsStale(false)
       setScanVersion((v) => v + 1)
-      onScanComplete?.(scanResult)
+      onScanComplete?.(scanResult, vaultPath)
       setSelectedIssueIds(new Set())
       setAnchorIndex(null)
       setTrashDeleteIds([])
@@ -368,7 +421,9 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
       saveCachedResult(undefined)
       setError(e instanceof Error ? e.message : tr.scanErrorFailed)
     } finally {
-      unlisten()
+      if (typeof unlisten === 'function') {
+        unlisten()
+      }
       setScanProgress(null)
       setLoading(false)
     }
@@ -460,16 +515,24 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
   }
 
   const handleOpenFile = async (path: string) => {
+    if (!vaultPath.trim()) {
+      setError(tr.scanErrorNoVault)
+      return
+    }
     try {
-      await invoke('open_file', { path })
+      await openVaultFile(path, vaultPath)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
   }
 
   const handleOpenFolder = async (path: string) => {
+    if (!vaultPath.trim()) {
+      setError(tr.scanErrorNoVault)
+      return
+    }
     try {
-      await invoke('open_file_parent', { path })
+      await openVaultFileParent(path, vaultPath)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -511,15 +574,289 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
     }
   }
 
+  const handleBackup = async (mode: 'directory' | 'zip') => {
+    const selectedPaths = allIssues
+      .filter((i) => selectedIssueIds.has(i.id))
+      .map((i) => i.imagePath)
+
+    if (selectedPaths.length === 0) {
+      setError(tr.scanBackupNoSelection)
+      return
+    }
+
+    if (mode === 'directory') {
+      const dest = await open({ directory: true, multiple: false })
+      if (typeof dest !== 'string') return
+      try {
+        const summary = await invoke<{ copied: number; skipped: number; dest: string }>(
+          'backup_selected_files', { paths: selectedPaths, dest, vaultPath }
+        )
+        setError(tr.scanBackupDone
+          .replace('{copied}', String(summary.copied))
+          .replace('{skipped}', String(summary.skipped))
+          .replace('{dest}', summary.dest))
+        await refreshOps()
+      } catch (e) {
+        setError(tr.scanBackupFailed.replace('{message}', e instanceof Error ? e.message : String(e)))
+      }
+    } else {
+      const dest = await save({
+        defaultPath: 'voyager-backup.zip',
+        filters: [{ name: 'ZIP', extensions: ['zip'] }],
+      })
+      if (!dest) return
+      try {
+        const summary = await invoke<{ copied: number; skipped: number; dest: string }>(
+          'backup_selected_zip', { paths: selectedPaths, dest, vaultPath }
+        )
+        setError(tr.scanBackupDone
+          .replace('{copied}', String(summary.copied))
+          .replace('{skipped}', String(summary.skipped))
+          .replace('{dest}', summary.dest))
+        await refreshOps()
+      } catch (e) {
+        setError(tr.scanBackupFailed.replace('{message}', e instanceof Error ? e.message : String(e)))
+      }
+    }
+  }
+
+  const handleRename = async () => {
+    if (!renameIssue || !renameNewName.trim() || !vaultPath) return
+    setRenaming(true)
+    try {
+      const summary = await invoke<{ mdUpdated: number }>('rename_image', {
+        oldPath: renameIssue.imagePath,
+        newName: renameNewName.trim(),
+        vaultRoot: vaultPath,
+        mdRefs: result?.scanIndex.mdRefs ?? {},
+      })
+      setError(tr.scanRenameDone.replace('{count}', String(summary.mdUpdated)))
+      setRenameIssue(null)
+      setRenameNewName('')
+      await runScan()
+    } catch (e) {
+      setError(tr.scanRenameFailed.replace('{message}', e instanceof Error ? e.message : String(e)))
+    } finally {
+      setRenaming(false)
+    }
+  }
+
+  // --- Feature 1: Backup All ---
+  const handleBackupAll = async (mode: 'directory' | 'zip') => {
+    const allPaths = allIssues
+      .filter((i) => i.type !== 'broken')
+      .map((i) => i.imagePath)
+
+    if (allPaths.length === 0) {
+      setError(tr.scanBackupNoSelection)
+      return
+    }
+
+    if (mode === 'directory') {
+      const dest = await open({ directory: true, multiple: false })
+      if (typeof dest !== 'string') return
+      try {
+        const summary = await invoke<{ copied: number; skipped: number; dest: string }>(
+          'backup_selected_files', { paths: allPaths, dest, vaultPath }
+        )
+        setError(tr.scanBackupDone
+          .replace('{copied}', String(summary.copied))
+          .replace('{skipped}', String(summary.skipped))
+          .replace('{dest}', summary.dest))
+        await refreshOps()
+      } catch (e) {
+        setError(tr.scanBackupFailed.replace('{message}', e instanceof Error ? e.message : String(e)))
+      }
+    } else {
+      const dest = await save({
+        defaultPath: 'voyager-backup-all.zip',
+        filters: [{ name: 'ZIP', extensions: ['zip'] }],
+      })
+      if (!dest) return
+      try {
+        const summary = await invoke<{ copied: number; skipped: number; dest: string }>(
+          'backup_selected_zip', { paths: allPaths, dest, vaultPath }
+        )
+        setError(tr.scanBackupDone
+          .replace('{copied}', String(summary.copied))
+          .replace('{skipped}', String(summary.skipped))
+          .replace('{dest}', summary.dest))
+        await refreshOps()
+      } catch (e) {
+        setError(tr.scanBackupFailed.replace('{message}', e instanceof Error ? e.message : String(e)))
+      }
+    }
+  }
+
+  // --- Feature 2: Find Duplicates ---
+  const handleFindDuplicates = async () => {
+    if (!vaultPath.trim()) { setError(tr.scanErrorNoVault); return }
+    setDupFinding(true)
+    setError('')
+    try {
+      const groups = await invoke<DuplicateGroup[]>('find_duplicates', { vaultPath })
+      setDupGroups(groups)
+      // Auto-select first file in each group as "keep"
+      const keepMap: Record<string, string> = {}
+      for (const g of groups) {
+        if (g.files.length > 0) keepMap[g.hash] = g.files[0].absPath
+      }
+      setDupKeepMap(keepMap)
+    } catch (e) {
+      setError(tr.dupMergeFailed.replace('{message}', e instanceof Error ? e.message : String(e)))
+    } finally {
+      setDupFinding(false)
+    }
+  }
+
+  const handleMergeDuplicates = async () => {
+    if (!dupGroups || !vaultPath.trim()) return
+    setDupMerging(true)
+    setError('')
+    let totalMds = 0
+    let totalFiles = 0
+    try {
+      for (const g of dupGroups) {
+        const keep = dupKeepMap[g.hash]
+        if (!keep) continue
+        const remove = g.files.filter((f) => f.absPath !== keep).map((f) => f.absPath)
+        if (remove.length === 0) continue
+        const summary = await invoke<MergeSummary>('merge_duplicates', { keep, remove, vaultPath })
+        totalMds += summary.updatedMds
+        totalFiles += summary.deletedFiles
+      }
+      setError(tr.dupMergeDone.replace('{mds}', String(totalMds)).replace('{files}', String(totalFiles)))
+      setDupGroups(null)
+      await runScan()
+    } catch (e) {
+      setError(tr.dupMergeFailed.replace('{message}', e instanceof Error ? e.message : String(e)))
+    } finally {
+      setDupMerging(false)
+    }
+  }
+
+  // --- Feature 3: Convert Format ---
+  const handleConvert = async () => {
+    if (!vaultPath.trim()) { setError(tr.scanErrorNoVault); return }
+    setConverting(true)
+    setError('')
+    try {
+      let paths: string[]
+      if (convertScope === 'selected') {
+        paths = allIssues
+          .filter((i) => selectedIssueIds.has(i.id) && i.type !== 'broken')
+          .map((i) => i.imagePath)
+      } else {
+        // All images from scan result
+        paths = (result?.allImages ?? []).map((a) => a.path)
+        if (paths.length === 0) {
+          paths = allIssues.filter((i) => i.type !== 'broken').map((i) => i.imagePath)
+        }
+      }
+      const summary = await invoke<ConvertSummary>('convert_images', {
+        paths,
+        targetFormat: convertFormat,
+        quality: convertQuality,
+        vaultPath,
+      })
+      setError(tr.convertDone
+        .replace('{converted}', String(summary.converted))
+        .replace('{skipped}', String(summary.skipped))
+        .replace('{saved}', exportUtil.formatSize(summary.savedBytes)))
+      setConvertOpen(false)
+      await runScan()
+    } catch (e) {
+      setError(tr.convertFailed.replace('{message}', e instanceof Error ? e.message : String(e)))
+    } finally {
+      setConverting(false)
+    }
+  }
+
+  // --- Feature 5: Drag-to-fix broken (handler passed to DetailPanel) ---
+  const handleDropFixBroken = async (files: FileList, issue: AuditIssue) => {
+    if (!issue.mdPath || !vaultPath.trim() || files.length === 0) return
+    setError('')
+    try {
+      // Use the Tauri file drop path from the event
+      // In Tauri v1 we can't get the full path from browser FileList directly,
+      // so we pass filename and let the backend handle it
+      const droppedPath = (files[0] as File & { path?: string }).path
+      if (!droppedPath) {
+        setError(tr.detailDropFixFailed.replace('{message}', 'Cannot read file path from drop event'))
+        return
+      }
+      const result = await invoke<string>('fix_broken_with_file', {
+        droppedFilePath: droppedPath,
+        brokenImageName: issue.imagePath,
+        mdPath: issue.mdPath,
+        vaultPath,
+      })
+      setError(tr.detailDropFixDone.replace('{path}', result))
+      await runScan()
+    } catch (e) {
+      setError(tr.detailDropFixFailed.replace('{message}', e instanceof Error ? e.message : String(e)))
+    }
+  }
+
+  // --- Feature 6: Keyboard shortcuts ---
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Ctrl+F → focus search
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+      }
+      // Delete → delete selected (open confirm)
+      if (e.key === 'Delete' && selectedIssueIds.size > 0 && !fixing && !loading) {
+        e.preventDefault()
+        setConfirmOpen(true)
+      }
+      // Ctrl+A → select all
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a' && !e.shiftKey) {
+        // Only if not in an input
+        if (document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+          e.preventDefault()
+          selectAllIssues()
+        }
+      }
+      // Escape → close overlays
+      if (e.key === 'Escape') {
+        if (renameIssue) { setRenameIssue(null); return }
+        if (dupGroups) { setDupGroups(null); return }
+        if (convertOpen) { setConvertOpen(false); return }
+        if (galleryActionIssue) { setGalleryActionIssue(null); setPreviewZoom(null); setPreviewNaturalSize(null); return }
+        if (fullscreenIssue) { exitFullscreen(); return }
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [selectedIssueIds.size, fixing, loading, renameIssue, dupGroups, convertOpen, galleryActionIssue, fullscreenIssue, exitFullscreen])
+
   const handleCardContextMenu = useCallback((issue: AuditIssue, x: number, y: number) => {
     setCtxMenu({ x, y, issue })
   }, [])
 
   const ctxMenuItems: MenuItem[] = ctxMenu ? [
-    { label: tr.scanCtxOpenFile, onClick: () => handleOpenFile(ctxMenu.issue.imagePath) },
-    { label: tr.scanCtxOpenFolder, onClick: () => handleOpenFolder(ctxMenu.issue.imagePath) },
-    { label: tr.scanCtxCopyPath, onClick: () => { void navigator.clipboard.writeText(ctxMenu.issue.imagePath) } },
-    { label: tr.scanCtxFullscreen, onClick: () => enterFullscreen(ctxMenu.issue) },
+    ...(ctxMenu.issue.type !== 'broken' ? [
+      { label: tr.scanCtxOpenFile, onClick: () => handleOpenFile(ctxMenu.issue.imagePath) },
+      { label: tr.scanCtxOpenFolder, onClick: () => handleOpenFolder(ctxMenu.issue.imagePath) },
+    ] : []),
+    ...(ctxMenu.issue.type === 'broken' && ctxMenu.issue.mdPath ? [
+      { label: tr.scanCtxOpenRefNote, onClick: () => handleOpenFile(ctxMenu.issue.mdPath!) },
+      { label: tr.scanCtxOpenRefNoteFolder, onClick: () => handleOpenFolder(ctxMenu.issue.mdPath!) },
+    ] : []),
+    { label: tr.scanCtxCopyPath, onClick: () => { void navigator.clipboard.writeText(ctxMenu.issue.type === 'broken' ? (ctxMenu.issue.mdPath ?? ctxMenu.issue.imagePath) : ctxMenu.issue.imagePath) } },
+    ...(ctxMenu.issue.type !== 'broken' ? [
+      { label: tr.scanCtxFullscreen, onClick: () => enterFullscreen(ctxMenu.issue) },
+    ] : []),
+    ...(ctxMenu.issue.type !== 'broken' ? [
+      { label: tr.scanCtxRename, onClick: () => {
+        const path = ctxMenu.issue.imagePath
+        const parts = path.split(/[/\\]/)
+        setRenameNewName(parts[parts.length - 1] || path)
+        setRenameIssue(ctxMenu.issue)
+      }},
+    ] : []),
     {
       label: selectedIssueIds.has(ctxMenu.issue.id) ? tr.scanCtxDeselect : tr.scanCtxSelect,
       onClick: () => {
@@ -533,7 +870,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
     },
   ] : []
 
-  const currentGalleryIssues = galleryTab === 'orphan' ? orphanIssues : misplacedIssues
+  const currentGalleryIssues = galleryTab === 'orphan' ? orphanIssues : galleryTab === 'misplaced' ? misplacedIssues : brokenIssues
 
   return (
     <div className="scan-layout">
@@ -554,6 +891,10 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
         onClearSelection={clearSelectedIssues}
         onFix={() => setConfirmOpen(true)}
         onExport={handleExport}
+        onBackup={handleBackup}
+        onBackupAll={handleBackupAll}
+        onFindDuplicates={handleFindDuplicates}
+        onConvert={() => setConvertOpen(true)}
         generateThumbs={generateThumbs}
         onGenerateThumbsChange={setGenerateThumbs}
       />
@@ -572,12 +913,17 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
         </div>
       )}
 
+      <div style={{ padding: '8px 12px 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+        {tr.scanOverviewGuide}
+      </div>
+
       <div className="scan-panels">
         <Sidebar
           category={galleryTab}
           onCategoryChange={setGalleryTab}
           orphanCount={orphanIssues.length}
           misplacedCount={misplacedIssues.length}
+          brokenCount={brokenIssues.length}
           searchText={searchText}
           onSearchChange={setSearchText}
           fileTypeFilter={fileTypeFilter}
@@ -585,9 +931,13 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
           typeCounts={typeCounts}
           sizeFilter={sizeFilter}
           onSizeFilterChange={setSizeFilter}
+          searchInputRef={searchInputRef}
         />
 
         <main className="scan-gallery">
+          {galleryTab === 'broken' && currentGalleryIssues.length > 0 && (
+            <div className="broken-hint-banner">{tr.brokenHint}</div>
+          )}
           <VirtualGallery
             issues={currentGalleryIssues}
             displayMode={displayMode}
@@ -609,6 +959,12 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
           onOpenFile={handleOpenFile}
           onOpenFolder={handleOpenFolder}
           onFullscreen={enterFullscreen}
+          onRename={(issue) => {
+            const parts = issue.imagePath.split(/[/\\]/)
+            setRenameNewName(parts[parts.length - 1] || issue.imagePath)
+            setRenameIssue(issue)
+          }}
+          onDropFixBroken={handleDropFixBroken}
         />
       </div>
 
@@ -624,7 +980,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
       />
 
       {galleryActionIssue && (() => {
-        const currentList = galleryTab === 'orphan' ? orphanIssues : misplacedIssues
+        const currentList = galleryTab === 'orphan' ? orphanIssues : galleryTab === 'misplaced' ? misplacedIssues : brokenIssues
         const currentIdx = currentList.findIndex((i) => i.id === galleryActionIssue.id)
         const hasPrev = currentIdx > 0
         const hasNext = currentIdx < currentList.length - 1
@@ -829,7 +1185,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
       })()}
 
       {fullscreenIssue && (() => {
-        const currentList = galleryTab === 'orphan' ? orphanIssues : misplacedIssues
+        const currentList = galleryTab === 'orphan' ? orphanIssues : galleryTab === 'misplaced' ? misplacedIssues : brokenIssues
         const fsIdx = currentList.findIndex((i) => i.id === fullscreenIssue.id)
         const fsPrev = fsIdx > 0 ? currentList[fsIdx - 1] : null
         const fsNext = fsIdx < currentList.length - 1 ? currentList[fsIdx + 1] : null
@@ -1000,6 +1356,165 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
           items={ctxMenuItems}
           onClose={() => setCtxMenu(null)}
         />
+      )}
+
+      {renameIssue && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'var(--overlay-bg)', display: 'grid', placeItems: 'center', zIndex: 1200 }}
+          onClick={() => setRenameIssue(null)}
+        >
+          <div
+            style={{ background: 'var(--panel-bg)', border: '1px solid var(--border-color)', borderRadius: 10, padding: 24, minWidth: 380, maxWidth: 500 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: '0 0 12px', fontSize: '1rem' }}>{tr.scanRenameTitle}</h3>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 8 }}>
+              {tr.scanRenameCurrentName}: <strong>{(() => { const p = renameIssue.imagePath.split(/[/\\]/); return p[p.length - 1] || renameIssue.imagePath })()}</strong>
+            </div>
+            <input
+              type="text"
+              value={renameNewName}
+              onChange={(e) => setRenameNewName(e.target.value)}
+              placeholder={tr.scanRenameNewPlaceholder}
+              style={{ width: '100%', padding: '6px 10px', fontSize: '0.9rem', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--input-bg)', color: 'var(--text-main)', boxSizing: 'border-box', marginBottom: 12 }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !renaming) { void handleRename() } }}
+              autoFocus
+            />
+            {result?.scanIndex.mdRefs && (() => {
+              const oldFilename = (() => { const p = renameIssue.imagePath.split(/[/\\]/); return p[p.length - 1] || renameIssue.imagePath })()
+              const affectedMds = Object.entries(result.scanIndex.mdRefs)
+                .filter(([, refs]) => refs.includes(oldFilename))
+                .map(([mdPath]) => mdPath)
+              return affectedMds.length > 0 ? (
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 12, maxHeight: 120, overflowY: 'auto' }}>
+                  <div style={{ marginBottom: 4 }}>{tr.scanRenameAffectedMds.replace('{count}', String(affectedMds.length))}</div>
+                  <ul style={{ margin: 0, paddingLeft: 16 }}>
+                    {affectedMds.map((md) => <li key={md} style={{ wordBreak: 'break-all' }}>{md}</li>)}
+                  </ul>
+                </div>
+              ) : null
+            })()}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button type="button" className="btn-sm" onClick={() => setRenameIssue(null)}>{tr.confirmCancel}</button>
+              <button type="button" className="btn-sm btn-primary" onClick={() => { void handleRename() }} disabled={renaming || !renameNewName.trim()}>
+                {renaming ? '...' : tr.confirmOk}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Duplicate Groups Panel */}
+      {dupGroups && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'var(--overlay-bg)', display: 'grid', placeItems: 'center', zIndex: 1200 }}
+          onClick={() => setDupGroups(null)}
+        >
+          <div
+            style={{ background: 'var(--panel-bg)', border: '1px solid var(--border-color)', borderRadius: 10, padding: 24, minWidth: 500, maxWidth: '80vw', maxHeight: '80vh', overflowY: 'auto' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: '0 0 12px', fontSize: '1rem' }}>{tr.dupTitle}</h3>
+            {dupGroups.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)' }}>{tr.dupNoGroups}</p>
+            ) : (
+              <>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 12 }}>
+                  {tr.dupGroupCount.replace('{count}', String(dupGroups.length))}
+                </div>
+                {dupGroups.map((g) => (
+                  <div key={g.hash} style={{ marginBottom: 16, padding: 12, border: '1px solid var(--border-color)', borderRadius: 8 }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 8 }}>SHA-256: {g.hash.slice(0, 16)}...</div>
+                    {g.files.map((f) => (
+                      <label key={f.absPath} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: '0.85rem', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name={`dup-${g.hash}`}
+                          checked={dupKeepMap[g.hash] === f.absPath}
+                          onChange={() => setDupKeepMap((prev) => ({ ...prev, [g.hash]: f.absPath }))}
+                        />
+                        <span style={{ flex: 1, wordBreak: 'break-all' }}>{f.absPath}</span>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
+                          {f.fileSize > 1024 * 1024 ? `${(f.fileSize / (1024 * 1024)).toFixed(1)} MB` : `${(f.fileSize / 1024).toFixed(1)} KB`}
+                        </span>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
+                          {tr.dupRefCount.replace('{count}', String(f.refCount))}
+                        </span>
+                        {dupKeepMap[g.hash] === f.absPath && (
+                          <span style={{ color: 'var(--success-color, #4caf50)', fontWeight: 600, fontSize: '0.75rem' }}>{tr.dupKeepLabel}</span>
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                ))}
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+                  <button type="button" className="btn-sm" onClick={() => setDupGroups(null)}>{tr.confirmCancel}</button>
+                  <button type="button" className="btn-sm btn-sm-danger" onClick={() => { void handleMergeDuplicates() }} disabled={dupMerging}>
+                    {dupMerging ? tr.dupMerging : tr.dupMergeButton}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Convert Format Panel */}
+      {convertOpen && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'var(--overlay-bg)', display: 'grid', placeItems: 'center', zIndex: 1200 }}
+          onClick={() => setConvertOpen(false)}
+        >
+          <div
+            style={{ background: 'var(--panel-bg)', border: '1px solid var(--border-color)', borderRadius: 10, padding: 24, minWidth: 400, maxWidth: 500 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: '0 0 16px', fontSize: '1rem' }}>{tr.convertTitle}</h3>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>{tr.convertTargetFormat}</label>
+              <select
+                value={convertFormat}
+                onChange={(e) => setConvertFormat(e.target.value as 'webp' | 'jpeg')}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--input-bg)', color: 'var(--text-main)' }}
+              >
+                <option value="webp">WebP</option>
+                <option value="jpeg">JPEG</option>
+              </select>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>
+                {tr.convertQuality}: {convertQuality}
+              </label>
+              <input
+                type="range"
+                min={1}
+                max={100}
+                value={convertQuality}
+                onChange={(e) => setConvertQuality(Number(e.target.value))}
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>{tr.convertScope}</label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer', marginBottom: 4 }}>
+                <input type="radio" name="convertScope" checked={convertScope === 'all'} onChange={() => setConvertScope('all')} />
+                {tr.convertScopeAll}
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer' }}>
+                <input type="radio" name="convertScope" checked={convertScope === 'selected'} onChange={() => setConvertScope('selected')} />
+                {tr.convertScopeSelected} ({selectedIssueIds.size})
+              </label>
+            </div>
+            <div style={{ padding: '8px 12px', background: 'var(--warning-bg, rgba(255,152,0,0.08))', borderRadius: 6, fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 16 }}>
+              {tr.convertConfirmBody}
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button type="button" className="btn-sm" onClick={() => setConvertOpen(false)}>{tr.confirmCancel}</button>
+              <button type="button" className="btn-sm btn-sm-primary" onClick={() => { void handleConvert() }} disabled={converting}>
+                {converting ? tr.convertConverting : tr.convertExecute}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -1,3 +1,4 @@
+import type { RefObject } from 'react'
 import type { SizeFilter } from '../types'
 import { useLang } from '../App'
 
@@ -25,10 +26,11 @@ const SIZE_OPTIONS: { value: SizeFilter; labelKey?: string; label?: string }[] =
 ]
 
 interface SidebarProps {
-  category: 'orphan' | 'misplaced'
-  onCategoryChange: (cat: 'orphan' | 'misplaced') => void
+  category: 'orphan' | 'misplaced' | 'broken'
+  onCategoryChange: (cat: 'orphan' | 'misplaced' | 'broken') => void
   orphanCount: number
   misplacedCount: number
+  brokenCount: number
   searchText: string
   onSearchChange: (text: string) => void
   fileTypeFilter: Set<string>
@@ -36,6 +38,7 @@ interface SidebarProps {
   typeCounts: Record<string, number>
   sizeFilter: SizeFilter
   onSizeFilterChange: (size: SizeFilter) => void
+  searchInputRef?: RefObject<HTMLInputElement | null>
 }
 
 function Sidebar({
@@ -43,6 +46,7 @@ function Sidebar({
   onCategoryChange,
   orphanCount,
   misplacedCount,
+  brokenCount,
   searchText,
   onSearchChange,
   fileTypeFilter,
@@ -50,6 +54,7 @@ function Sidebar({
   typeCounts,
   sizeFilter,
   onSizeFilterChange,
+  searchInputRef,
 }: SidebarProps) {
   const tr = useLang()
 
@@ -65,6 +70,11 @@ function Sidebar({
 
   return (
     <aside className="sidebar">
+      <div className="sidebar-section">
+        <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+          {tr.sidebarFilterGuide}
+        </p>
+      </div>
       <div className="sidebar-section">
         <div className="sidebar-heading">{tr.sidebarCategory}</div>
         <button
@@ -95,11 +105,26 @@ function Sidebar({
           </span>
           <span className="sidebar-badge">{misplacedCount}</span>
         </button>
+        <button
+          type="button"
+          className={`sidebar-item ${category === 'broken' ? 'active' : ''}`}
+          onClick={() => onCategoryChange('broken')}
+        >
+          <span className="sidebar-item-label">
+            <span>Broken</span>
+            <span className="sidebar-hint-wrap">
+              <span className="sidebar-hint">?</span>
+              <span className="sidebar-tooltip">{tr.sidebarBrokenTooltip}</span>
+            </span>
+          </span>
+          <span className="sidebar-badge">{brokenCount}</span>
+        </button>
       </div>
 
       <div className="sidebar-section">
         <div className="sidebar-heading">{tr.sidebarSearch}</div>
         <input
+          ref={searchInputRef}
           type="text"
           className="sidebar-search"
           placeholder={tr.sidebarSearchPlaceholder}

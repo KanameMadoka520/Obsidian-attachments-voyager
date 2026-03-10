@@ -8,9 +8,17 @@ tsconfig.tsbuildinfo
 
 # Thumbnail cache (runtime generated)
 .voyager-gallery-cache/
+.voyager-gallery-cache-all/
 
 # App data (runtime generated)
 voyager-data/
+
+# Rust / cargo local env
+.cargo/
+
+# Temporary files
+*.tmp
+*.temp
 
 # Logs
 *.log
@@ -31,3 +39,7 @@ npminstall-debug.log
 
 # Compact handoff docs (session-specific, not project code)
 compact-*.md
+
+# Local git worktrees
+.worktrees/
+.claude
