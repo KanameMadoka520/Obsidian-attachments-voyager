@@ -1,14 +1,27 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { Suspense, createContext, lazy, useContext, useEffect, useMemo, useState } from 'react'
 import TitleBar from './components/TitleBar'
 import { getTranslations } from './lib/i18n'
 import type { Translations } from './lib/i18n'
 import * as storage from './lib/storage'
-import MigratePage from './pages/MigratePage'
 import ScanPage from './pages/ScanPage'
-import StatsPage from './pages/StatsPage'
-import GalleryPage from './pages/GalleryPage'
-import HelpPage from './pages/HelpPage'
 import type { ConflictPolicy, Lang, ScanResult, ThemeMode } from './types'
+
+const IS_VITEST = typeof process !== 'undefined' && Boolean(process.env.VITEST)
+
+const migratePagePromise = IS_VITEST ? null : import('./pages/MigratePage')
+const statsPagePromise = IS_VITEST ? null : import('./pages/StatsPage')
+const galleryPagePromise = IS_VITEST ? null : import('./pages/GalleryPage')
+const helpPagePromise = IS_VITEST ? null : import('./pages/HelpPage')
+
+const loadMigratePage = () => migratePagePromise ?? import('./pages/MigratePage')
+const loadStatsPage = () => statsPagePromise ?? import('./pages/StatsPage')
+const loadGalleryPage = () => galleryPagePromise ?? import('./pages/GalleryPage')
+const loadHelpPage = () => helpPagePromise ?? import('./pages/HelpPage')
+
+const MigratePage = lazy(loadMigratePage)
+const StatsPage = lazy(loadStatsPage)
+const GalleryPage = lazy(loadGalleryPage)
+const HelpPage = lazy(loadHelpPage)
 
 export const LangContext = createContext<Translations>(getTranslations('zh'))
 export const useLang = () => useContext(LangContext)
@@ -55,6 +68,10 @@ function applyTheme(mode: ThemeMode) {
   } else {
     document.documentElement.setAttribute('data-theme', mode)
   }
+}
+
+function TabFallback() {
+  return <div style={{ flex: 1 }} />
 }
 
 function App() {
@@ -131,17 +148,21 @@ function App() {
           {activeTab === 'scan' && (
             <ScanPage conflictPolicy={settings.conflictPolicy} onScanComplete={handleScanComplete} />
           )}
-          {activeTab === 'migrate' && (
-            <MigratePage conflictPolicy={settings.conflictPolicy} />
-          )}
-          {activeTab === 'stats' && (
-            <StatsPage result={lastScanResult} />
-          )}
-          {activeTab === 'gallery' && (
-            <GalleryPage result={lastScanResult} vaultPath={lastVaultPath} />
-          )}
-          {activeTab === 'help' && (
-            <HelpPage />
+          {activeTab !== 'scan' && (
+            <Suspense fallback={<TabFallback />}>
+              {activeTab === 'migrate' && (
+                <MigratePage conflictPolicy={settings.conflictPolicy} />
+              )}
+              {activeTab === 'stats' && (
+                <StatsPage result={lastScanResult} />
+              )}
+              {activeTab === 'gallery' && (
+                <GalleryPage result={lastScanResult} vaultPath={lastVaultPath} />
+              )}
+              {activeTab === 'help' && (
+                <HelpPage />
+              )}
+            </Suspense>
           )}
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
+import { createElement, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../App'
 
@@ -22,6 +23,26 @@ vi.mock('@tauri-apps/api/window', () => ({
     close: () => Promise.resolve(),
     onResized: () => Promise.resolve(() => {}),
   },
+}))
+
+vi.mock('recharts', async () => {
+  const actual = await vi.importActual<typeof import('recharts')>('recharts')
+  return {
+    ...actual,
+    ResponsiveContainer: ({ children }: { children: ReactNode }) => createElement('div', { style: { width: 320, height: 240 } }, children),
+  }
+})
+
+vi.mock('../pages/HelpPage', () => ({
+  default: () => createElement('div', null, '软件能做什么'),
+}))
+
+vi.mock('../pages/GalleryPage', () => ({
+  default: ({ result }: { result: { allImages?: unknown[] } | null }) => (
+    result?.allImages?.length
+      ? createElement('div', null, '这里展示仓库中的全部附件，不仅是问题图片。适合用来统一浏览、筛选和抽查附件资产。')
+      : createElement('div', null, '请先在「附件扫描」页面执行扫描')
+  ),
 }))
 
 vi.mock('@tauri-apps/api/tauri', () => ({
@@ -101,9 +122,6 @@ describe('app gallery persistence', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '附件总览' }))
 
-    await waitFor(() => {
-      expect(screen.queryByText('请先在「附件扫描」页面执行扫描')).not.toBeInTheDocument()
-    })
-    expect(screen.getByText('这里展示仓库中的全部附件，不仅是问题图片。适合用来统一浏览、筛选和抽查附件资产。')).toBeInTheDocument()
+    await screen.findByText('这里展示仓库中的全部附件，不仅是问题图片。适合用来统一浏览、筛选和抽查附件资产。')
   })
 })

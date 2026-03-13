@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
+import { createElement, type ReactNode } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/tauri'
 import GalleryPage from '../pages/GalleryPage'
@@ -24,6 +25,26 @@ vi.mock('@tauri-apps/api/tauri', () => ({
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
 }))
+
+vi.mock('@tauri-apps/api/window', () => ({
+  appWindow: {
+    isMaximized: () => Promise.resolve(false),
+    isFullscreen: () => Promise.resolve(false),
+    setFullscreen: () => Promise.resolve(),
+    minimize: () => Promise.resolve(),
+    toggleMaximize: () => Promise.resolve(),
+    close: () => Promise.resolve(),
+    onResized: () => Promise.resolve(() => {}),
+  },
+}))
+
+vi.mock('recharts', async () => {
+  const actual = await vi.importActual<typeof import('recharts')>('recharts')
+  return {
+    ...actual,
+    ResponsiveContainer: ({ children }: { children: ReactNode }) => createElement('div', { style: { width: 320, height: 240 } }, children),
+  }
+})
 
 afterEach(() => {
   cleanup()
