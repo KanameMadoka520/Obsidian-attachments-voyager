@@ -11,7 +11,7 @@
 3. [Understanding Results](#3-understanding-results)
 4. [Fixing Issues](#4-fixing-issues)
 5. [Backing Up Attachments](#5-backing-up-attachments)
-6. [Note Migration](#6-note-migration)
+6. [Migration & Preprocessing](#6-migration--preprocessing)
 7. [Statistics](#7-statistics)
 8. [Settings & Preferences](#8-settings--preferences)
 9. [FAQ](#9-faq)
@@ -126,11 +126,15 @@ After selecting images, the toolbar shows a **"Backup ▾"** dropdown:
 
 ---
 
-## 6. Note Migration
+## 6. Migration & Preprocessing
+
+This page now contains two folder-reorganization tools: linked note migration, and a preprocessing step for merging descendant `attachments` folders.
+
+### Linked Note Migration
 
 Migration moves a note and all its referenced attachments to a new location:
 
-1. Switch to the **"Migration"** tab
+1. Switch to the **"Migration & Prep"** tab
 2. Select the Markdown file to migrate
 3. Choose the target directory
 4. The tool automatically:
@@ -139,6 +143,19 @@ Migration moves a note and all its referenced attachments to a new location:
 5. Conflict handling follows the same policy as fix operations
 
 > Attachments are moved first, then the note — so if something goes wrong mid-way, the note remains at its original location.
+
+### Preprocess: Merge Descendant attachments
+
+If AI-assisted or manual folder cleanup has left old `attachments` folders scattered across nested subfolders, use the preprocessing tool first:
+
+1. In the lower half of the **"Migration & Prep"** page, choose the parent folder you want to clean up
+2. Click **"Preview Merge Plan"** to inspect the pending operations first
+3. The tool recursively finds every descendant `attachments` directory inside that folder
+4. Files from those directories are moved into one unified `attachments/` folder under the selected root
+5. The old `attachments` folders are removed once they become empty
+6. After preprocessing, return to the scan page, scan again, and use the existing scan + fix workflow to place attachments back into their correct note-level folders
+
+> This step saves you from manually hunting for leftover empty `attachments` folders after large-scale folder reorganization.
 
 ---
 

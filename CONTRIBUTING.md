@@ -77,8 +77,8 @@ npx tsc -b --noEmit         # TypeScript 类型检查（不生成文件）
 - `sidebar-layout.test.ts`：验证侧边栏 CSS 支持纵向滚动
 
 当前主工作区验证状态：
-- `npm test` 已通过（9 个测试文件 / 16 个用例）
-- `cargo test --manifest-path src-tauri/Cargo.toml` 已通过（40 个测试）
+- `npm test` 已通过（9 个测试文件 / 20 个用例）
+- `cargo test --manifest-path src-tauri/Cargo.toml` 已通过（44 个测试）
 - `.worktrees/**` 已在 Vitest 配置中排除，不再污染主工作区测试收集
 
 #### Windows ↔ Linux/Docker/WSL 切换注意（重要）
@@ -236,7 +236,7 @@ npm run tauri:build
 
 前端通过 `invoke('command_name', { params })` 调用后端 Rust 函数，返回 JSON 自动反序列化。所有命令定义在 `main.rs` 中。
 
-全部 24 个命令：
+全部 26 个命令：
 
 | 命令 | 功能 |
 |------|------|

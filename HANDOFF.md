@@ -57,9 +57,9 @@
 
 #### 主工作区验证结果
 - `npm run build` 通过。
-- `npm test` 通过（9 个测试文件 / 16 个用例）。
-- `cargo test --manifest-path src-tauri/Cargo.toml` 通过（40 个测试）。
-- `npm run tauri:build` 通过（Windows 下可产出 MSI + NSIS）。
+- `npm test` 通过（9 个测试文件 / 20 个用例）。
+- `cargo test --manifest-path src-tauri/Cargo.toml` 通过（44 个测试）。
+- `npm run tauri:build` 通过（当前环境已验证 Debian 12 下可产出 `.deb` / `.rpm` / `.AppImage`；历史记录中 Windows 下可产出 MSI + NSIS）。
 - 前端回归测试覆盖（通过）：
   - `app-gallery-persistence.test.tsx`
   - `gallery-page.test.tsx`
@@ -68,9 +68,11 @@
 #### 跨系统验证注意事项（Windows ↔ Linux/Docker/WSL）
 - `node_modules` **无法跨操作系统复用**（rollup 原生可选依赖会不匹配）。如果切换 OS 后 `npm test` / `npm run build` 失败，请在当前 OS 重新安装依赖：`rm -rf node_modules && npm ci`。
 - 在 Debian / Ubuntu 容器内跑 Rust 后端测试需要 WebKitGTK / GTK / libsoup 等系统依赖，并建议使用 rustup 安装较新的 Cargo。
+- Linux/Tauri 构建现已通过仓库内 patch 固化：`src-tauri/Cargo.toml` 使用 `[patch.crates-io]` 指向 `src-tauri/vendor/wry/`。该 vendored `wry` 包含一处 WebKitGTK trait 导入修复，用于保证 Debian 12 环境下 `cargo test` 可通过；在未确认上游依赖已修复并完成回归前，不要移除此 patch。
+  - 维护说明见：`docs/maintenance/wry-linux-patch.md`
 
 #### 仍需关注（非阻塞）
-- Vite 生产构建仍会提示 chunk-size warning；不影响测试/构建/打包，但未来可考虑 code-splitting 或 manualChunks。
+- 当前已通过页面级懒加载消除主入口的 Vite chunk-size warning；后续如继续扩展图表/画廊功能，仍建议关注 bundle 体积，优先保持非首屏页面按需加载。
 
 ### 已完成阶段
 
@@ -94,7 +96,7 @@ Phase 8–11 的代码已存在于工作区，但尚未提交。
 
 #### 交接说明（可直接转给下一位开发者）
 
-- 当前工作区的自动化验证已通过：`npm test`（9 个测试文件 / 16 个用例）与 `cargo test --manifest-path src-tauri/Cargo.toml`（40 个测试）。
+- 当前工作区的自动化验证已通过：`npm test`（9 个测试文件 / 20 个用例）与 `cargo test --manifest-path src-tauri/Cargo.toml`（44 个测试）。
 - `HANDOFF.md`、`README.md`、`CONTRIBUTING.md` 已同步更新；下一步请优先查看本文件中的「下一步清单（推荐）」。
 - 当前最值得优先做的后续工作不是继续改代码，而是执行 smoke checklist，并按建议拆分 Phase 8–11 的未提交改动。
 - Broken 拖拽修复已明确列为延后高风险检查项；当前实现依赖 `File.path`，需要在 Windows 真机/Tauri 环境手工验证。
@@ -109,9 +111,9 @@ Phase 8–11 的代码已存在于工作区，但尚未提交。
 - [ ] 如果你在不同 OS 间切换过：在当前 OS 重新安装前端依赖：`rm -rf node_modules && npm ci`
 
 #### 1) 先跑通验证（任何提交前必须绿）
-- [ ] `npm test`（期望：9 个测试文件 / 16 个用例）
-- [ ] `npm run build`（期望：成功；chunk-size warning 可接受）
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml`（期望：40 个测试）
+- [ ] `npm test`（期望：9 个测试文件 / 20 个用例）
+- [ ] `npm run build`（期望：成功；当前主工作区已无 Vite chunk-size warning）
+- [ ] `cargo test --manifest-path src-tauri/Cargo.toml`（期望：44 个测试）
 
 #### 1.5) 手工验收烟雾测试（推荐）
 - [ ] 备份（目录 + zip）：选中几张非 broken 图片执行备份流程；核对输出与操作历史。
@@ -206,13 +208,13 @@ Phase 8–11 的代码已存在于工作区，但尚未提交。
 
 ```
 src-tauri/src/
-  main.rs        (789 lines)  — 17 Tauri commands, IPC entry points
+  main.rs        (expanded)   — 26 Tauri commands, IPC entry points
   scanner.rs     (343 lines)  — vault scanning, issue detection
   parser.rs      (147 lines)  — Markdown image ref extraction
   models.rs      (44 lines)   — shared structs (ScanIssue, ScanResult, etc.)
   thumb_cache.rs (185 lines)  — 3-tier WebP thumbnail generation
   ops_log.rs     (166 lines)  — operation history persistence
-  migrate.rs     (123 lines)  — attachment migration logic
+  migrate.rs     (expanded)   — note migration + descendant attachments preprocessing
   fix_plan.rs    (87 lines)   — fix plan generation
   runtime_log.rs (71 lines)   — runtime logging
   startup_diag.rs(85 lines)   — startup diagnostics
@@ -226,7 +228,7 @@ src/pages/
   ScanPage.tsx   (1180 lines) — main scan + issue management page
   GalleryPage.tsx(491 lines)  — attachment gallery with preview overlay
   StatsPage.tsx  (340 lines)  — vault statistics and charts
-  MigratePage.tsx(156 lines)  — batch migration page
+  MigratePage.tsx(expanded)   — migration + preprocessing workspace
   HelpPage.tsx   (46 lines)   — keyboard shortcuts and help
 
 src/components/
@@ -431,7 +433,7 @@ cargo tauri build        # 生产构建
 
 ## 已知问题
 
-1. **前端 bundle 偏大警告** —— `npm run build` / `npm run tauri:build` 仍会输出 Vite chunk-size warning。当前不阻塞；未来可用动态导入或 manual chunk 拆分优化。
+1. **前端 bundle 体积持续关注** —— 当前已通过页面级动态导入消除 Vite chunk-size warning，但后续如果继续扩大统计图表或总览页功能，仍应优先保持非首屏页面按需加载，避免主入口重新膨胀。
 
 2. **超大 vault 性能** —— 对于 50k+ 图片的仓库，首次全量扫描仍可能较慢；增量扫描会改善后续体验。
 
