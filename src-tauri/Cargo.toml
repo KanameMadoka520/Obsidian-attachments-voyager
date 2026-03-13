@@ -18,6 +18,8 @@ rayon = "1.10"
 zip = "0.6"
 sha2 = "0.10"
 
+[patch.crates-io]
+wry = { path = "vendor/wry" }
+
 [features]
 custom-protocol = [ "tauri/custom-protocol" ]
-
