@@ -71,6 +71,7 @@ export interface Translations {
   statusNoHistory: string
   statusTaskTypeFix: string
   statusTaskTypeMigration: string
+  statusTaskTypeFlatten: string
   statusApplied: string
   statusFailed: string
   statusSkipped: string
@@ -211,8 +212,35 @@ export interface Translations {
   migrateConflictPrompt: string
   migrateExplainTitle: string
   migrateExplainBody: string
+  migrateWorkspaceTitle: string
   migrateOverviewGuide: string
   migrateActionGuide: string
+  flattenTitle: string
+  flattenSourceDir: string
+  flattenSourcePlaceholder: string
+  flattenPickDir: string
+  flattenDestinationDir: string
+  flattenDestinationPlaceholder: string
+  flattenPreviewPlan: string
+  flattenExecuting: string
+  flattenExecute: string
+  flattenNoRootError: string
+  flattenPreviewGenerated: string
+  flattenPreviewEmpty: string
+  flattenPreviewFailed: string
+  flattenNoPreviewError: string
+  flattenComplete: string
+  flattenFailed: string
+  flattenConflictPrompt: string
+  flattenOverviewGuide: string
+  flattenStepPick: string
+  flattenStepCollect: string
+  flattenStepMerge: string
+  flattenStepCleanup: string
+  flattenStepNext: string
+  flattenPlanTitle: string
+  flattenPlanColMapping: string
+  flattenPlanEmpty: string
 
   // StatsPage
   statsNoData: string
@@ -369,7 +397,7 @@ export interface Translations {
 const zh: Translations = {
   // TitleBar - tabs
   tabScan: '附件问题扫描',
-  tabMigrate: '联动迁移',
+  tabMigrate: '迁移与预处理',
   tabStats: '统计',
   tabGallery: '附件总览',
   tabHelp: '说明',
@@ -434,12 +462,13 @@ const zh: Translations = {
   statusNoHistory: '暂无操作历史',
   statusTaskTypeFix: '修复',
   statusTaskTypeMigration: '迁移',
+  statusTaskTypeFlatten: '预处理',
   statusApplied: '已执行',
   statusFailed: '失败',
   statusSkipped: '跳过',
   statusActionMove: '移动',
   statusActionDelete: '删除',
-  statusGuide: '日志用于查看本次运行过程，操作历史用于回看已经执行过的修复、备份、迁移或转换结果。',
+  statusGuide: '日志用于查看本次运行过程，操作历史用于回看已经执行过的修复、备份、迁移、预处理或转换结果。',
 
   // ConfirmDialog
   confirmDefaultTitle: '确认',
@@ -574,8 +603,35 @@ const zh: Translations = {
   migrateConflictPrompt: '检测到重名冲突。确定选择"覆盖"吗？取消将使用"改名共存"。',
   migrateExplainTitle: '工作原理说明（联动迁移）',
   migrateExplainBody: '联动迁移会把笔记与其关联附件按目标目录一起迁移，并在冲突时根据策略（弹窗/覆盖/改名共存）处理同名文件。',
-  migrateOverviewGuide: '此页面适合整理目录结构：先指定笔记和目标目录，再预览迁移计划，确认无误后执行。',
-  migrateActionGuide: '建议先预览再执行。预览只展示即将发生的路径变化，执行迁移才会真正改动文件。',
+  migrateWorkspaceTitle: '迁移与预处理工作台',
+  migrateOverviewGuide: '此页面现在包含两类目录整理工具：一类是把单篇笔记和其附件一起迁移，另一类是先把选定目录下各子文件夹里的 attachments 汇总到同一个 attachments 目录，作为后续扫描修复前的预处理步骤。',
+  migrateActionGuide: '两类操作都建议先预览再执行。预览只展示即将发生的路径变化，真正的文件改动只会在执行按钮触发后发生。',
+  flattenTitle: '预处理：汇总子目录 attachments',
+  flattenSourceDir: '整理目录',
+  flattenSourcePlaceholder: '选择要整理的父级目录（不要直接选 attachments 文件夹）...',
+  flattenPickDir: '选择目录',
+  flattenDestinationDir: '统一 attachments',
+  flattenDestinationPlaceholder: '执行时会汇总到这里的 attachments 子文件夹...',
+  flattenPreviewPlan: '预览汇总计划',
+  flattenExecuting: '执行中...',
+  flattenExecute: '执行汇总',
+  flattenNoRootError: '请先选择要整理的目录',
+  flattenPreviewGenerated: '已生成预处理预览：{folders} 个 attachments 文件夹，{files} 个文件待汇总',
+  flattenPreviewEmpty: '未发现需要汇总的子目录 attachments 文件夹',
+  flattenPreviewFailed: '预览失败：{message}',
+  flattenNoPreviewError: '请先生成预处理预览再执行',
+  flattenComplete: '预处理完成：task={taskId}，移动 {movedFiles}，删除空目录 {removedFolders}，跳过 {skippedFiles}',
+  flattenFailed: '预处理失败：{message}',
+  flattenConflictPrompt: '检测到同名冲突。确定选择"覆盖"吗？取消将使用"改名共存"。',
+  flattenOverviewGuide: '当 AI 或手工整理过笔记目录后，原先分散在各个子文件夹中的 attachments 往往会残留在深层目录里。这个预处理会先把它们集中到当前目录下唯一的 attachments 文件夹，再把已经清空的旧 attachments 文件夹删掉，方便你后续回到扫描页统一修复归位。',
+  flattenStepPick: '选择你要整理的父级目录。工具会递归检查该目录下所有子文件夹。',
+  flattenStepCollect: '找到所有子文件夹中的 attachments 目录，并列出其中待提取的文件。',
+  flattenStepMerge: '把这些文件统一移动到当前所选目录下的 attachments/ 中；如果重名，会按当前冲突策略处理。',
+  flattenStepCleanup: '每个旧 attachments 目录在文件搬空后都会尝试删除，这样以后不用再一个个手动找空目录。',
+  flattenStepNext: '执行完成后，回到扫描页重新扫描。现有“扫描 + 修复”流程会把这些附件再移动回各自正确的位置。',
+  flattenPlanTitle: '预处理预览',
+  flattenPlanColMapping: '即将执行的预处理操作',
+  flattenPlanEmpty: '尚无预处理预览，请先选择目录并点击预览',
 
   // StatsPage
   statsNoData: '请先在「附件扫描」页面执行扫描',
@@ -730,7 +786,7 @@ const zh: Translations = {
 const en: Translations = {
   // TitleBar - tabs
   tabScan: 'Issue Scan',
-  tabMigrate: 'Migrate',
+  tabMigrate: 'Migration & Prep',
   tabStats: 'Stats',
   tabGallery: 'Gallery',
   tabHelp: 'Help',
@@ -795,12 +851,13 @@ const en: Translations = {
   statusNoHistory: 'No operation history',
   statusTaskTypeFix: 'Fix',
   statusTaskTypeMigration: 'Migration',
+  statusTaskTypeFlatten: 'Prep',
   statusApplied: 'Applied',
   statusFailed: 'Failed',
   statusSkipped: 'Skipped',
   statusActionMove: 'Move',
   statusActionDelete: 'Delete',
-  statusGuide: 'Logs show what the current run is doing. History shows fixes, backups, migrations, or conversions that have already been executed.',
+  statusGuide: 'Logs show what the current run is doing. History shows fixes, backups, migrations, preprocessing, or conversions that have already been executed.',
 
   // ConfirmDialog
   confirmDefaultTitle: 'Confirm',
@@ -935,8 +992,35 @@ const en: Translations = {
   migrateConflictPrompt: 'Name conflict detected. Choose "Overwrite"? Cancel will use "Rename to coexist".',
   migrateExplainTitle: 'How It Works (Linked Migration)',
   migrateExplainBody: 'Linked migration moves notes and their associated attachments to the target directory together, handling name conflicts according to the chosen policy (prompt / overwrite / rename to coexist).',
-  migrateOverviewGuide: 'Use this page when you want to reorganize folders by moving a note together with its related attachments. Choose the note and destination first, then preview before executing.',
-  migrateActionGuide: 'Preview only shows the planned path changes. Execute Migration is the step that actually changes files.',
+  migrateWorkspaceTitle: 'Migration and Preprocessing Workspace',
+  migrateOverviewGuide: 'This page now bundles two folder-reorganization tools: linked migration for moving one note together with its attachments, and a preprocessing step that gathers descendant attachments folders into one shared attachments directory before you run scan-and-fix.',
+  migrateActionGuide: 'Preview first for both tools. Preview only shows the planned path changes; files are modified only when you execute the operation.',
+  flattenTitle: 'Preprocess: Merge Descendant attachments',
+  flattenSourceDir: 'Root Folder',
+  flattenSourcePlaceholder: 'Choose the parent folder to reorganize (do not choose an attachments folder itself)...',
+  flattenPickDir: 'Browse',
+  flattenDestinationDir: 'Unified attachments',
+  flattenDestinationPlaceholder: 'Files will be gathered into this attachments subfolder when executed...',
+  flattenPreviewPlan: 'Preview Merge Plan',
+  flattenExecuting: 'Executing...',
+  flattenExecute: 'Run Merge',
+  flattenNoRootError: 'Please choose the folder you want to preprocess first',
+  flattenPreviewGenerated: 'Prep preview ready: {folders} attachments folder(s), {files} file(s) to gather',
+  flattenPreviewEmpty: 'No descendant attachments folders need to be merged',
+  flattenPreviewFailed: 'Preview failed: {message}',
+  flattenNoPreviewError: 'Please generate the preprocessing preview before executing',
+  flattenComplete: 'Preprocess complete: task={taskId}, moved {movedFiles}, removed empty folders {removedFolders}, skipped {skippedFiles}',
+  flattenFailed: 'Preprocess failed: {message}',
+  flattenConflictPrompt: 'Name conflict detected. Choose "Overwrite"? Cancel will use "Rename to coexist".',
+  flattenOverviewGuide: 'After AI-assisted or manual folder cleanup, attachments folders often remain scattered across nested subfolders. This preprocessing step pulls them into a single attachments folder under the selected root, then removes the old attachments folders once they are empty so you do not need to hunt them down later.',
+  flattenStepPick: 'Choose the parent folder you want to clean up. The tool will inspect all descendant folders recursively.',
+  flattenStepCollect: 'It finds every descendant attachments directory and lists the files waiting to be extracted.',
+  flattenStepMerge: 'Those files are moved into the selected folder\'s attachments/ directory. Name conflicts follow the current conflict policy.',
+  flattenStepCleanup: 'Each old attachments folder is removed after it becomes empty, so you do not have to clean up empty folders by hand later.',
+  flattenStepNext: 'After this completes, go back to the scan page and run scan again. The existing scan + fix workflow can then place the attachments back into the correct note-level folders.',
+  flattenPlanTitle: 'Preprocessing Preview',
+  flattenPlanColMapping: 'Pending preprocessing operations',
+  flattenPlanEmpty: 'No preprocessing preview yet. Choose a folder and click Preview first.',
 
   // StatsPage
   statsNoData: 'Please run a scan on the "Scan" page first',

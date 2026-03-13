@@ -61,11 +61,15 @@ fn hashed_name(path: &str) -> String {
 }
 
 pub fn cache_root_path_string() -> String {
-    cache_dir_with_scope(CacheScope::Issue).to_string_lossy().to_string()
+    cache_dir_with_scope(CacheScope::Issue)
+        .to_string_lossy()
+        .to_string()
 }
 
 pub fn cache_root_path_string_all() -> String {
-    cache_dir_with_scope(CacheScope::All).to_string_lossy().to_string()
+    cache_dir_with_scope(CacheScope::All)
+        .to_string_lossy()
+        .to_string()
 }
 
 fn clear_cache_with_scope(scope: CacheScope) -> Result<usize> {
@@ -141,15 +145,24 @@ pub fn generate_thumbnail(original_path: &str, max_edge: u32) -> Result<Thumbnai
     })
 }
 
-pub fn generate_thumbnail_multi(original_path: &str, sizes: &[(&str, u32)]) -> Result<MultiThumbnailResult> {
+pub fn generate_thumbnail_multi(
+    original_path: &str,
+    sizes: &[(&str, u32)],
+) -> Result<MultiThumbnailResult> {
     generate_thumbnail_multi_with_scope(original_path, sizes, CacheScope::Issue)
 }
 
-pub fn generate_thumbnail_multi_all(original_path: &str, sizes: &[(&str, u32)]) -> Result<MultiThumbnailResult> {
+pub fn generate_thumbnail_multi_all(
+    original_path: &str,
+    sizes: &[(&str, u32)],
+) -> Result<MultiThumbnailResult> {
     generate_thumbnail_multi_with_scope(original_path, sizes, CacheScope::All)
 }
 
-pub fn get_thumbnail_paths_all(paths: &[String], sizes: &[(&str, u32)]) -> HashMap<String, HashMap<String, String>> {
+pub fn get_thumbnail_paths_all(
+    paths: &[String],
+    sizes: &[(&str, u32)],
+) -> HashMap<String, HashMap<String, String>> {
     let mut result = HashMap::new();
     for original_path in paths {
         let filename = hashed_name(original_path);

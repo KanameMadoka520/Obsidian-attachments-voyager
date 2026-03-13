@@ -417,6 +417,12 @@ body {
   border: 1px solid rgba(82, 196, 26, 0.2);
 }
 
+.alert-info {
+  background-color: rgba(24, 144, 255, 0.1);
+  color: var(--primary-color);
+  border: 1px solid rgba(24, 144, 255, 0.2);
+}
+
 /* Modal / Dialog */
 .modal-overlay {
   position: fixed;

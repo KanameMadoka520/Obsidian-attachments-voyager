@@ -68,7 +68,7 @@ export type ConflictPolicy = 'promptEach' | 'overwriteAll' | 'renameAll'
 export interface OperationEntry {
   entryId: string
   filePath: string
-  action: 'move' | 'delete'
+  action: string
   source: string
   target: string
   status: 'applied' | 'failed' | 'skipped'
@@ -77,7 +77,7 @@ export interface OperationEntry {
 
 export interface OperationTask {
   taskId: string
-  taskType: 'migration' | 'fix'
+  taskType: string
   createdAt: string
   policy: ConflictPolicy
   status: 'applied'

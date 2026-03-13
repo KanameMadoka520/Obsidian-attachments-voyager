@@ -74,7 +74,10 @@ mod tests {
     fn report_contains_mode_and_paths() {
         let exe = PathBuf::from("C:/app/app.exe");
         let cwd = PathBuf::from("C:/app");
-        let probes = vec![PathBuf::from("C:/app/resources"), PathBuf::from("C:/app/dist/index.html")];
+        let probes = vec![
+            PathBuf::from("C:/app/resources"),
+            PathBuf::from("C:/app/dist/index.html"),
+        ];
 
         let report = format_report("release", &exe, &cwd, &probes);
 

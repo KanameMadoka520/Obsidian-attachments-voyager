@@ -22,6 +22,16 @@ function StatusBar({
   const [expanded, setExpanded] = useState(false)
   const [drawerTab, setDrawerTab] = useState<'logs' | 'history'>('logs')
   const latest = logs.length > 0 ? logs[logs.length - 1] : null
+  const taskTypeLabel = (taskType: string) => ({
+    fix: tr.statusTaskTypeFix,
+    migration: tr.statusTaskTypeMigration,
+    'flatten-attachments': tr.statusTaskTypeFlatten,
+  } as Record<string, string>)[taskType] ?? taskType
+  const actionLabel = (action: string) => ({
+    move: tr.statusActionMove,
+    delete: tr.statusActionDelete,
+    'delete-dir': tr.statusActionDelete,
+  } as Record<string, string>)[action] ?? action
 
   return (
     <div className={`status-bar ${expanded ? 'expanded' : ''}`}>
@@ -100,7 +110,7 @@ function StatusBar({
                 tasks.map((task) => (
                   <div key={task.taskId} className="history-task">
                     <div className="history-task-header">
-                      <span className="history-task-type">{task.taskType === 'fix' ? tr.statusTaskTypeFix : tr.statusTaskTypeMigration}</span>
+                      <span className="history-task-type">{taskTypeLabel(task.taskType)}</span>
                       <span className="history-task-time">{task.createdAt}</span>
                       <span className={`history-task-status status-${task.status}`}>{
                         ({ applied: tr.statusApplied } as Record<string, string>)[task.status] ?? task.status
@@ -109,7 +119,7 @@ function StatusBar({
                     <div className="history-entries">
                       {task.entries.map((entry) => (
                         <div key={entry.entryId} className="history-entry">
-                          <span className="history-entry-action">{entry.action === 'move' ? tr.statusActionMove : tr.statusActionDelete}</span>
+                          <span className="history-entry-action">{actionLabel(entry.action)}</span>
                           <span className="history-entry-path">{entry.filePath}</span>
                           <span className={`history-entry-status status-${entry.status}`}>{
                             ({ applied: tr.statusApplied, failed: tr.statusFailed, skipped: tr.statusSkipped } as Record<string, string>)[entry.status] ?? entry.status

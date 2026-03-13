@@ -9,6 +9,11 @@ interface OperationHistoryPanelProps {
 function OperationHistoryPanel({ tasks }: OperationHistoryPanelProps) {
   const tr = useLang()
   const [open, setOpen] = useState(false)
+  const taskTypeLabel = (taskType: string) => ({
+    fix: tr.statusTaskTypeFix,
+    migration: tr.statusTaskTypeMigration,
+    'flatten-attachments': tr.statusTaskTypeFlatten,
+  } as Record<string, string>)[taskType] ?? taskType
 
   return (
     <section className="card">
@@ -26,7 +31,7 @@ function OperationHistoryPanel({ tasks }: OperationHistoryPanelProps) {
             <div key={task.taskId} className="card" style={{ marginBottom: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                 <div>
-                  <strong>{task.taskType}</strong> · {task.createdAt}
+                  <strong>{taskTypeLabel(task.taskType)}</strong> · {task.createdAt}
                 </div>
               </div>
 

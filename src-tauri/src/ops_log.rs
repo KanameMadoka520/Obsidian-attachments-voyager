@@ -84,9 +84,15 @@ fn ops_history_path() -> std::path::PathBuf {
 
 pub fn load_from_disk() {
     let path = ops_history_path();
-    if !path.exists() { return; }
-    let Ok(content) = std::fs::read_to_string(&path) else { return };
-    let Ok(tasks_from_disk) = serde_json::from_str::<Vec<OperationTask>>(&content) else { return };
+    if !path.exists() {
+        return;
+    }
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(tasks_from_disk) = serde_json::from_str::<Vec<OperationTask>>(&content) else {
+        return;
+    };
     if let Ok(mut guard) = tasks().lock() {
         *guard = tasks_from_disk;
         if guard.len() > 200 {

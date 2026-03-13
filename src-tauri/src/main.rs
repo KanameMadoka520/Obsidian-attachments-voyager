@@ -15,8 +15,8 @@ pub mod scanner;
 pub mod startup_diag;
 pub mod thumb_cache;
 
-use models::{ScanIssue, ScanResult};
 use migrate::conflict_target;
+use models::{ScanIssue, ScanResult};
 use ops_log::{
     create_task, list_tasks, load_from_disk, save_task, ConflictPolicy, EntryStatus,
     OperationEntry, TaskStatus,
@@ -41,26 +41,41 @@ struct CacheClearSummary {
 }
 
 #[tauri::command]
-fn scan_vault(window: tauri::Window, root: String, generate_thumbs: Option<bool>, thumb_size: Option<u32>, prev_index: Option<models::ScanIndex>) -> Result<ScanResult, String> {
+fn scan_vault(
+    window: tauri::Window,
+    root: String,
+    generate_thumbs: Option<bool>,
+    thumb_size: Option<u32>,
+    prev_index: Option<models::ScanIndex>,
+) -> Result<ScanResult, String> {
     let generate_thumbs = generate_thumbs.unwrap_or(true);
     let thumb_size = thumb_size.unwrap_or(256);
 
     append_runtime_log(
         "info",
-        format!(
-            "scan_vault root={root} generate_thumbs={generate_thumbs} thumb_size={thumb_size}"
-        ),
+        format!("scan_vault root={root} generate_thumbs={generate_thumbs} thumb_size={thumb_size}"),
     );
 
-    let progress: scanner::ProgressFn = Box::new(move |phase: &str, current: usize, total: usize| {
-        let _ = window.emit("scan-progress", serde_json::json!({
-            "phase": phase,
-            "current": current,
-            "total": total,
-        }));
-    });
+    let progress: scanner::ProgressFn =
+        Box::new(move |phase: &str, current: usize, total: usize| {
+            let _ = window.emit(
+                "scan-progress",
+                serde_json::json!({
+                    "phase": phase,
+                    "current": current,
+                    "total": total,
+                }),
+            );
+        });
 
-    scanner::scan_vault_with_thumbs(Path::new(&root), generate_thumbs, thumb_size, Some(&progress), prev_index.as_ref()).map_err(|e| e.to_string())
+    scanner::scan_vault_with_thumbs(
+        Path::new(&root),
+        generate_thumbs,
+        thumb_size,
+        Some(&progress),
+        prev_index.as_ref(),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -75,8 +90,12 @@ fn execute_migration(
         format!("execute_migration note={note_path} target={target_dir}"),
     );
 
-    let summary = migrate::migrate_note_with_assets(Path::new(&note_path), Path::new(&target_dir), policy.clone())
-        .map_err(|e| e.to_string())?;
+    let summary = migrate::migrate_note_with_assets(
+        Path::new(&note_path),
+        Path::new(&target_dir),
+        policy.clone(),
+    )
+    .map_err(|e| e.to_string())?;
 
     let mut task = create_task("migration", policy);
     task.task_id = summary.task_id.clone();
@@ -87,7 +106,42 @@ fn execute_migration(
 }
 
 #[tauri::command]
-fn fix_issues(issues: Vec<ScanIssue>, policy: Option<ConflictPolicy>) -> Result<FixSummary, String> {
+fn preview_flatten_attachments(
+    root_dir: String,
+    policy: Option<ConflictPolicy>,
+) -> Result<migrate::FlattenAttachmentsPlan, String> {
+    let policy = policy.unwrap_or_default();
+    append_runtime_log(
+        "info",
+        format!("preview_flatten_attachments root={root_dir}"),
+    );
+    migrate::preview_flatten_attachments(Path::new(&root_dir), policy).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn flatten_attachments(
+    root_dir: String,
+    policy: Option<ConflictPolicy>,
+) -> Result<migrate::FlattenAttachmentsSummary, String> {
+    let policy = policy.unwrap_or_default();
+    append_runtime_log("info", format!("flatten_attachments root={root_dir}"));
+
+    let summary = migrate::flatten_attachments_into_root(Path::new(&root_dir), policy.clone())
+        .map_err(|e| e.to_string())?;
+
+    let mut task = create_task("flatten-attachments", policy);
+    task.task_id = summary.task_id.clone();
+    task.entries = summary.entries.clone();
+    save_task(task);
+
+    Ok(summary)
+}
+
+#[tauri::command]
+fn fix_issues(
+    issues: Vec<ScanIssue>,
+    policy: Option<ConflictPolicy>,
+) -> Result<FixSummary, String> {
     let policy = policy.unwrap_or_default();
     let mut task = create_task("fix", policy);
 
@@ -319,16 +373,28 @@ fn get_runtime_logs(limit: Option<usize>) -> Vec<RuntimeLogLine> {
 fn clear_thumbnail_cache() -> Result<CacheClearSummary, String> {
     let removed = thumb_cache::clear_cache().map_err(|e| e.to_string())?;
     let cache_dir = thumb_cache::cache_root_path_string();
-    append_runtime_log("info", format!("clear_thumbnail_cache removed={removed} cache_dir={cache_dir}"));
-    Ok(CacheClearSummary { removed, cache_dir: cache_dir })
+    append_runtime_log(
+        "info",
+        format!("clear_thumbnail_cache removed={removed} cache_dir={cache_dir}"),
+    );
+    Ok(CacheClearSummary {
+        removed,
+        cache_dir: cache_dir,
+    })
 }
 
 #[tauri::command]
 fn clear_thumbnail_cache_all() -> Result<CacheClearSummary, String> {
     let removed = thumb_cache::clear_cache_all().map_err(|e| e.to_string())?;
     let cache_dir = thumb_cache::cache_root_path_string_all();
-    append_runtime_log("info", format!("clear_thumbnail_cache_all removed={removed} cache_dir={cache_dir}"));
-    Ok(CacheClearSummary { removed, cache_dir: cache_dir })
+    append_runtime_log(
+        "info",
+        format!("clear_thumbnail_cache_all removed={removed} cache_dir={cache_dir}"),
+    );
+    Ok(CacheClearSummary {
+        removed,
+        cache_dir: cache_dir,
+    })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -339,7 +405,12 @@ struct ThumbGenSummary {
     total: usize,
 }
 
-fn run_thumbnail_generation<F>(window: tauri::Window, paths: Vec<String>, generate: F, command_name: &str) -> Result<ThumbGenSummary, String>
+fn run_thumbnail_generation<F>(
+    window: tauri::Window,
+    paths: Vec<String>,
+    generate: F,
+    command_name: &str,
+) -> Result<ThumbGenSummary, String>
 where
     F: Fn(&str) -> Result<thumb_cache::MultiThumbnailResult, String> + Sync,
 {
@@ -366,43 +437,67 @@ where
         }
         let completed = done.fetch_add(1, Ordering::Relaxed) + 1;
         if completed % 50 == 0 || completed == total {
-            let _ = window.emit("scan-progress", serde_json::json!({
-                "phase": "thumbnails",
-                "current": completed,
-                "total": total,
-            }));
+            let _ = window.emit(
+                "scan-progress",
+                serde_json::json!({
+                    "phase": "thumbnails",
+                    "current": completed,
+                    "total": total,
+                }),
+            );
         }
     });
 
     let gen = generated.load(Ordering::Relaxed);
     let skip = skipped.load(Ordering::Relaxed);
-    append_runtime_log("info", format!("{command_name}: generated={gen} skipped={skip} total={total}"));
+    append_runtime_log(
+        "info",
+        format!("{command_name}: generated={gen} skipped={skip} total={total}"),
+    );
 
-    Ok(ThumbGenSummary { generated: gen, skipped: skip, total })
+    Ok(ThumbGenSummary {
+        generated: gen,
+        skipped: skip,
+        total,
+    })
 }
 
 #[tauri::command]
-fn generate_all_thumbnails(window: tauri::Window, paths: Vec<String>) -> Result<ThumbGenSummary, String> {
+fn generate_all_thumbnails(
+    window: tauri::Window,
+    paths: Vec<String>,
+) -> Result<ThumbGenSummary, String> {
     run_thumbnail_generation(
         window,
         paths,
-        |path| thumb_cache::generate_thumbnail_multi(path, thumb_cache::SIZES).map_err(|e| e.to_string()),
+        |path| {
+            thumb_cache::generate_thumbnail_multi(path, thumb_cache::SIZES)
+                .map_err(|e| e.to_string())
+        },
         "generate_all_thumbnails",
     )
 }
 
 #[tauri::command]
-fn generate_all_thumbnails_all(window: tauri::Window, paths: Vec<String>) -> Result<ThumbGenSummary, String> {
+fn generate_all_thumbnails_all(
+    window: tauri::Window,
+    paths: Vec<String>,
+) -> Result<ThumbGenSummary, String> {
     run_thumbnail_generation(
         window,
         paths,
-        |path| thumb_cache::generate_thumbnail_multi_all(path, thumb_cache::SIZES).map_err(|e| e.to_string()),
+        |path| {
+            thumb_cache::generate_thumbnail_multi_all(path, thumb_cache::SIZES)
+                .map_err(|e| e.to_string())
+        },
         "generate_all_thumbnails_all",
     )
 }
 
 #[tauri::command]
-fn get_all_thumbnail_paths(paths: Vec<String>) -> std::collections::HashMap<String, std::collections::HashMap<String, String>> {
+fn get_all_thumbnail_paths(
+    paths: Vec<String>,
+) -> std::collections::HashMap<String, std::collections::HashMap<String, String>> {
     thumb_cache::get_thumbnail_paths_all(&paths, thumb_cache::SIZES)
 }
 
@@ -413,7 +508,10 @@ fn get_storage_dir() -> std::path::PathBuf {
 }
 
 fn is_valid_storage_key(key: &str) -> bool {
-    !key.is_empty() && key.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    !key.is_empty()
+        && key
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
 }
 
 fn storage_file_path(dir: &Path, key: &str) -> Result<PathBuf, String> {
@@ -450,7 +548,12 @@ fn validate_export_target(path: &Path) -> Result<(), String> {
 }
 
 fn validate_basename(name: &str, error_message: &str) -> Result<(), String> {
-    if name.trim().is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\\') {
+    if name.trim().is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+    {
         return Err(error_message.to_string());
     }
     Ok(())
@@ -500,7 +603,9 @@ fn read_local_storage(key: String) -> Result<Option<String>, String> {
     if !file.exists() {
         return Ok(None);
     }
-    fs::read_to_string(&file).map(Some).map_err(|e| e.to_string())
+    fs::read_to_string(&file)
+        .map(Some)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -552,7 +657,11 @@ struct BackupSummary {
 }
 
 #[tauri::command]
-fn backup_selected_files(paths: Vec<String>, dest: String, vault_path: String) -> Result<BackupSummary, String> {
+fn backup_selected_files(
+    paths: Vec<String>,
+    dest: String,
+    vault_path: String,
+) -> Result<BackupSummary, String> {
     let vault = Path::new(&vault_path);
     ensure_path_within_root(vault, vault, "Vault path does not exist")?;
 
@@ -580,11 +689,13 @@ fn backup_selected_files(paths: Vec<String>, dest: String, vault_path: String) -
             continue;
         }
 
-        let file_name = source.file_name()
+        let file_name = source
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown");
         let raw_target = dest_path.join(file_name);
-        let target = conflict_target(&raw_target, &ConflictPolicy::RenameAll).map_err(|e| e.to_string())?;
+        let target =
+            conflict_target(&raw_target, &ConflictPolicy::RenameAll).map_err(|e| e.to_string())?;
 
         match fs::copy(source, &target) {
             Ok(_) => {
@@ -615,20 +726,31 @@ fn backup_selected_files(paths: Vec<String>, dest: String, vault_path: String) -
     }
 
     ops_log::save_task(task);
-    append_runtime_log("info", format!("backup_selected_files: copied={copied} skipped={skipped}"));
+    append_runtime_log(
+        "info",
+        format!("backup_selected_files: copied={copied} skipped={skipped}"),
+    );
 
-    Ok(BackupSummary { copied, skipped, dest })
+    Ok(BackupSummary {
+        copied,
+        skipped,
+        dest,
+    })
 }
 
 #[tauri::command]
-fn backup_selected_zip(paths: Vec<String>, dest: String, vault_path: String) -> Result<BackupSummary, String> {
+fn backup_selected_zip(
+    paths: Vec<String>,
+    dest: String,
+    vault_path: String,
+) -> Result<BackupSummary, String> {
     let vault = Path::new(&vault_path);
     ensure_path_within_root(vault, vault, "Vault path does not exist")?;
 
     let file = fs::File::create(&dest).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipWriter::new(file);
-    let options = zip::write::FileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+    let options =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     let mut task = ops_log::create_task("backup-zip", ops_log::ConflictPolicy::RenameAll);
     let mut copied = 0usize;
@@ -652,7 +774,8 @@ fn backup_selected_zip(paths: Vec<String>, dest: String, vault_path: String) -> 
             continue;
         }
 
-        let base_name = source.file_name()
+        let base_name = source
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
             .to_string();
@@ -660,10 +783,14 @@ fn backup_selected_zip(paths: Vec<String>, dest: String, vault_path: String) -> 
         // Deduplicate names within zip
         let mut zip_name = base_name.clone();
         if names_used.contains(&zip_name) {
-            let stem = std::path::Path::new(&base_name).file_stem()
-                .and_then(|s| s.to_str()).unwrap_or("file");
-            let ext = std::path::Path::new(&base_name).extension()
-                .and_then(|s| s.to_str()).unwrap_or("");
+            let stem = std::path::Path::new(&base_name)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("file");
+            let ext = std::path::Path::new(&base_name)
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("");
             let mut i = 1;
             loop {
                 zip_name = if ext.is_empty() {
@@ -671,7 +798,9 @@ fn backup_selected_zip(paths: Vec<String>, dest: String, vault_path: String) -> 
                 } else {
                     format!("{stem} ({i}).{ext}")
                 };
-                if !names_used.contains(&zip_name) { break; }
+                if !names_used.contains(&zip_name) {
+                    break;
+                }
                 i += 1;
             }
         }
@@ -733,9 +862,16 @@ fn backup_selected_zip(paths: Vec<String>, dest: String, vault_path: String) -> 
 
     zip.finish().map_err(|e| e.to_string())?;
     ops_log::save_task(task);
-    append_runtime_log("info", format!("backup_selected_zip: copied={copied} skipped={skipped}"));
+    append_runtime_log(
+        "info",
+        format!("backup_selected_zip: copied={copied} skipped={skipped}"),
+    );
 
-    Ok(BackupSummary { copied, skipped, dest })
+    Ok(BackupSummary {
+        copied,
+        skipped,
+        dest,
+    })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -784,7 +920,8 @@ fn rename_image(
     let old = Path::new(&old_path);
     ensure_path_within_root(old, vault, "Source image must stay inside vault")?;
 
-    let old_filename = old.file_name()
+    let old_filename = old
+        .file_name()
         .and_then(|n| n.to_str())
         .ok_or("Cannot read filename")?
         .to_string();
@@ -807,24 +944,28 @@ fn rename_image(
     for (md_path_str, refs) in &md_refs {
         if refs.iter().any(|r| r == &old_filename) {
             let md_path = Path::new(md_path_str);
-            if !md_path.exists() { continue; }
+            if !md_path.exists() {
+                continue;
+            }
             match fs::read_to_string(md_path) {
                 Ok(content) => {
                     let updated = replace_image_refs_in_md(&content, &old_filename, &new_name);
                     if updated != content {
                         if let Err(e) = fs::write(md_path, &updated) {
-                            append_runtime_log("warn", format!(
-                                "rename_image: failed to write {}: {}", md_path_str, e
-                            ));
+                            append_runtime_log(
+                                "warn",
+                                format!("rename_image: failed to write {}: {}", md_path_str, e),
+                            );
                             continue;
                         }
                         md_files_updated.push(md_path_str.clone());
                     }
                 }
                 Err(e) => {
-                    append_runtime_log("warn", format!(
-                        "rename_image: failed to read {}: {}", md_path_str, e
-                    ));
+                    append_runtime_log(
+                        "warn",
+                        format!("rename_image: failed to read {}: {}", md_path_str, e),
+                    );
                 }
             }
         }
@@ -843,10 +984,15 @@ fn rename_image(
     });
     save_task(task);
 
-    append_runtime_log("info", format!(
-        "rename_image: {} -> {}, updated {} MD files",
-        old_filename, new_name, md_files_updated.len()
-    ));
+    append_runtime_log(
+        "info",
+        format!(
+            "rename_image: {} -> {}, updated {} MD files",
+            old_filename,
+            new_name,
+            md_files_updated.len()
+        ),
+    );
 
     Ok(RenameSummary {
         old_path,
@@ -878,9 +1024,12 @@ fn hash_file_sha256(path: &Path) -> std::io::Result<(String, u64)> {
 }
 
 fn duplicate_hash_candidates(paths: &[PathBuf]) -> Vec<PathBuf> {
-    let mut by_size: std::collections::HashMap<u64, Vec<PathBuf>> = std::collections::HashMap::new();
+    let mut by_size: std::collections::HashMap<u64, Vec<PathBuf>> =
+        std::collections::HashMap::new();
     for path in paths {
-        let Ok(size) = fs::metadata(path).map(|m| m.len()) else { continue; };
+        let Ok(size) = fs::metadata(path).map(|m| m.len()) else {
+            continue;
+        };
         by_size.entry(size).or_default().push(path.clone());
     }
 
@@ -892,7 +1041,10 @@ fn duplicate_hash_candidates(paths: &[PathBuf]) -> Vec<PathBuf> {
 }
 
 fn temp_output_path(target: &Path) -> PathBuf {
-    let file_name = target.file_name().and_then(|name| name.to_str()).unwrap_or("output");
+    let file_name = target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("output");
     let pid = std::process::id();
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -911,7 +1063,11 @@ fn write_atomic_output(target: &Path, data: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn prepare_md_updates(md_files: &[PathBuf], old_filename: &str, new_name: &str) -> Result<Vec<(PathBuf, String)>, String> {
+fn prepare_md_updates(
+    md_files: &[PathBuf],
+    old_filename: &str,
+    new_name: &str,
+) -> Result<Vec<(PathBuf, String)>, String> {
     let mut updates = Vec::new();
     for md in md_files {
         let content = fs::read_to_string(md).map_err(|e| e.to_string())?;
@@ -924,15 +1080,22 @@ fn prepare_md_updates(md_files: &[PathBuf], old_filename: &str, new_name: &str) 
 }
 
 fn apply_md_updates(updates: &[(PathBuf, String)]) -> Result<usize, String> {
-    apply_md_updates_with_writer(updates, |path, content| fs::write(path, content).map_err(|e| e.to_string()))
+    apply_md_updates_with_writer(updates, |path, content| {
+        fs::write(path, content).map_err(|e| e.to_string())
+    })
 }
 
 fn recommended_convert_parallelism(total_paths: usize) -> usize {
-    let available = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    let available = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
     total_paths.max(1).min(available).min(4)
 }
 
-fn apply_md_updates_with_writer<F>(updates: &[(PathBuf, String)], mut writer: F) -> Result<usize, String>
+fn apply_md_updates_with_writer<F>(
+    updates: &[(PathBuf, String)],
+    mut writer: F,
+) -> Result<usize, String>
 where
     F: FnMut(&PathBuf, &String) -> Result<(), String>,
 {
@@ -950,7 +1113,10 @@ where
     Ok(updates.len())
 }
 
-fn find_duplicates_impl(vault_path: String, progress_window: Option<&tauri::Window>) -> Result<Vec<models::DuplicateGroup>, String> {
+fn find_duplicates_impl(
+    vault_path: String,
+    progress_window: Option<&tauri::Window>,
+) -> Result<Vec<models::DuplicateGroup>, String> {
     use rayon::prelude::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -968,22 +1134,31 @@ fn find_duplicates_impl(vault_path: String, progress_window: Option<&tauri::Wind
     let done = AtomicUsize::new(0);
 
     // Hash all files in parallel
-    let hashed: Vec<Option<(String, String, u64)>> = hash_candidates.par_iter().map(|path| {
-        let completed = done.fetch_add(1, Ordering::Relaxed) + 1;
-        if completed % 100 == 0 || completed == total {
-            if let Some(window) = progress_window {
-                let _ = window.emit("duplicate-progress", serde_json::json!({
-                    "current": completed, "total": total
-                }));
+    let hashed: Vec<Option<(String, String, u64)>> = hash_candidates
+        .par_iter()
+        .map(|path| {
+            let completed = done.fetch_add(1, Ordering::Relaxed) + 1;
+            if completed % 100 == 0 || completed == total {
+                if let Some(window) = progress_window {
+                    let _ = window.emit(
+                        "duplicate-progress",
+                        serde_json::json!({
+                            "current": completed, "total": total
+                        }),
+                    );
+                }
             }
-        }
-        let (hash, size) = hash_file_sha256(path).ok()?;
-        Some((hash, path.to_string_lossy().to_string(), size))
-    }).collect();
+            let (hash, size) = hash_file_sha256(path).ok()?;
+            Some((hash, path.to_string_lossy().to_string(), size))
+        })
+        .collect();
 
     // Build md_refs for ref counting
     let mut md_refs: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for entry in walkdir::WalkDir::new(vault).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(vault)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         if entry.path().extension().and_then(|s| s.to_str()) == Some("md") {
             if let Ok(content) = fs::read_to_string(entry.path()) {
                 for name in parser::extract_image_refs(&content) {
@@ -994,22 +1169,33 @@ fn find_duplicates_impl(vault_path: String, progress_window: Option<&tauri::Wind
     }
 
     // Group by hash
-    let mut groups: std::collections::HashMap<String, Vec<models::DuplicateFile>> = std::collections::HashMap::new();
+    let mut groups: std::collections::HashMap<String, Vec<models::DuplicateFile>> =
+        std::collections::HashMap::new();
     for item in hashed.into_iter().flatten() {
         let (hash, abs_path, file_size) = item;
-        let filename = Path::new(&abs_path).file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+        let filename = Path::new(&abs_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
         let ref_count = md_refs.get(&filename).copied().unwrap_or(0);
         groups.entry(hash).or_default().push(models::DuplicateFile {
-            abs_path, file_size, ref_count,
+            abs_path,
+            file_size,
+            ref_count,
         });
     }
 
-    let result: Vec<models::DuplicateGroup> = groups.into_iter()
+    let result: Vec<models::DuplicateGroup> = groups
+        .into_iter()
         .filter(|(_, files)| files.len() >= 2)
         .map(|(hash, files)| models::DuplicateGroup { hash, files })
         .collect();
 
-    append_runtime_log("info", format!("find_duplicates: found {} duplicate groups", result.len()));
+    append_runtime_log(
+        "info",
+        format!("find_duplicates: found {} duplicate groups", result.len()),
+    );
     Ok(result)
 }
 
@@ -1019,12 +1205,17 @@ fn find_duplicates_for_tests(vault_path: String) -> Result<Vec<models::Duplicate
 }
 
 #[tauri::command]
-fn find_duplicates(window: tauri::Window, vault_path: String) -> Result<Vec<models::DuplicateGroup>, String> {
+fn find_duplicates(
+    window: tauri::Window,
+    vault_path: String,
+) -> Result<Vec<models::DuplicateGroup>, String> {
     find_duplicates_impl(vault_path, Some(&window))
 }
 
 fn collect_images_recursive(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
@@ -1036,16 +1227,26 @@ fn collect_images_recursive(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
 }
 
 #[tauri::command]
-fn merge_duplicates(keep: String, remove: Vec<String>, vault_path: String) -> Result<models::MergeSummary, String> {
-    append_runtime_log("info", format!("merge_duplicates keep={keep} remove={} files", remove.len()));
+fn merge_duplicates(
+    keep: String,
+    remove: Vec<String>,
+    vault_path: String,
+) -> Result<models::MergeSummary, String> {
+    append_runtime_log(
+        "info",
+        format!("merge_duplicates keep={keep} remove={} files", remove.len()),
+    );
 
     let vault = Path::new(&vault_path);
     ensure_path_within_root(vault, vault, "Vault path does not exist")?;
 
     let keep_path = Path::new(&keep);
     ensure_path_within_root(keep_path, vault, "Keep file must stay inside vault")?;
-    let keep_filename = keep_path.file_name().and_then(|n| n.to_str())
-        .ok_or("Cannot read keep filename")?.to_string();
+    let keep_filename = keep_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("Cannot read keep filename")?
+        .to_string();
 
     let mut total_updated_mds = 0usize;
     let mut deleted_files = 0usize;
@@ -1054,12 +1255,18 @@ fn merge_duplicates(keep: String, remove: Vec<String>, vault_path: String) -> Re
     for rm_path_str in &remove {
         let rm_path = Path::new(rm_path_str);
         ensure_path_within_root(rm_path, vault, "Remove file must stay inside vault")?;
-        let rm_filename = rm_path.file_name().and_then(|n| n.to_str())
-            .unwrap_or("").to_string();
+        let rm_filename = rm_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
 
         // Update all MD refs from rm_filename to keep_filename
         if rm_filename != keep_filename {
-            for entry in walkdir::WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
+            for entry in walkdir::WalkDir::new(root)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
                 if entry.path().extension().and_then(|s| s.to_str()) != Some("md") {
                     continue;
                 }
@@ -1089,12 +1296,21 @@ fn merge_duplicates(keep: String, remove: Vec<String>, vault_path: String) -> Re
         source: format!("{} duplicates", remove.len()),
         target: keep,
         status: EntryStatus::Applied,
-        message: Some(format!("Updated {} MDs, deleted {} files", total_updated_mds, deleted_files)),
+        message: Some(format!(
+            "Updated {} MDs, deleted {} files",
+            total_updated_mds, deleted_files
+        )),
     });
     save_task(task);
 
-    append_runtime_log("info", format!("merge_duplicates: updated_mds={total_updated_mds} deleted={deleted_files}"));
-    Ok(models::MergeSummary { updated_mds: total_updated_mds, deleted_files })
+    append_runtime_log(
+        "info",
+        format!("merge_duplicates: updated_mds={total_updated_mds} deleted={deleted_files}"),
+    );
+    Ok(models::MergeSummary {
+        updated_mds: total_updated_mds,
+        deleted_files,
+    })
 }
 
 #[cfg(test)]
@@ -1117,7 +1333,15 @@ fn convert_images_impl(
     use rayon::prelude::*;
     use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
-    append_runtime_log("info", format!("convert_images: {} files to {} q={}", paths.len(), target_format, quality));
+    append_runtime_log(
+        "info",
+        format!(
+            "convert_images: {} files to {} q={}",
+            paths.len(),
+            target_format,
+            quality
+        ),
+    );
 
     let target_ext = match target_format.as_str() {
         "webp" => "webp",
@@ -1158,10 +1382,15 @@ fn convert_images_impl(
         paths.par_iter().for_each(|path_str| {
             let result = (|| -> std::result::Result<(), String> {
                 let src_path = Path::new(path_str);
-                if !src_path.exists() { return Err("not found".into()); }
+                if !src_path.exists() {
+                    return Err("not found".into());
+                }
 
-                let current_ext = src_path.extension().and_then(|s| s.to_str())
-                    .unwrap_or("").to_ascii_lowercase();
+                let current_ext = src_path
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
                 if current_ext == target_ext || (target_ext == "jpg" && current_ext == "jpeg") {
                     return Err("already target format".into());
                 }
@@ -1172,7 +1401,10 @@ fn convert_images_impl(
                 let img = image::open(src_path).map_err(|e| e.to_string())?;
 
                 // Build new path
-                let stem = src_path.file_stem().and_then(|s| s.to_str()).unwrap_or("image");
+                let stem = src_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("image");
                 let new_name = format!("{stem}.{target_ext}");
                 let new_path = src_path.parent().unwrap_or(Path::new(".")).join(&new_name);
                 if new_path.exists() {
@@ -1186,10 +1418,12 @@ fn convert_images_impl(
                 let mut buf = std::io::Cursor::new(Vec::new());
                 match target_ext {
                     "webp" => {
-                        img.write_to(&mut buf, image::ImageFormat::WebP).map_err(|e| e.to_string())?;
+                        img.write_to(&mut buf, image::ImageFormat::WebP)
+                            .map_err(|e| e.to_string())?;
                     }
                     "jpg" => {
-                        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, quality);
+                        let encoder =
+                            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, quality);
                         img.write_with_encoder(encoder).map_err(|e| e.to_string())?;
                     }
                     _ => unreachable!(),
@@ -1221,9 +1455,12 @@ fn convert_images_impl(
             let completed = done.fetch_add(1, Ordering::Relaxed) + 1;
             if completed % 20 == 0 || completed == total {
                 if let Some(window) = progress_window {
-                    let _ = window.emit("convert-progress", serde_json::json!({
-                        "current": completed, "total": total
-                    }));
+                    let _ = window.emit(
+                        "convert-progress",
+                        serde_json::json!({
+                            "current": completed, "total": total
+                        }),
+                    );
                 }
             }
         });
@@ -1241,12 +1478,21 @@ fn convert_images_impl(
         source: format!("{total} images"),
         target: target_format,
         status: EntryStatus::Applied,
-        message: Some(format!("Converted {conv}, skipped {skip}, saved {saved} bytes")),
+        message: Some(format!(
+            "Converted {conv}, skipped {skip}, saved {saved} bytes"
+        )),
     });
     save_task(task);
 
-    append_runtime_log("info", format!("convert_images: converted={conv} skipped={skip} saved_bytes={saved}"));
-    Ok(models::ConvertSummary { converted: conv, skipped: skip, saved_bytes: saved })
+    append_runtime_log(
+        "info",
+        format!("convert_images: converted={conv} skipped={skip} saved_bytes={saved}"),
+    );
+    Ok(models::ConvertSummary {
+        converted: conv,
+        skipped: skip,
+        saved_bytes: saved,
+    })
 }
 
 #[tauri::command]
@@ -1316,6 +1562,8 @@ fn main() {
             clear_thumbnail_cache,
             clear_thumbnail_cache_all,
             execute_migration,
+            preview_flatten_attachments,
+            flatten_attachments,
             fix_issues,
             list_operation_history,
             open_file,
@@ -1343,7 +1591,10 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_allowed_export_extension, is_valid_storage_key, storage_file_path, validate_export_target, write_text_file, write_local_storage};
+    use super::{
+        is_allowed_export_extension, is_valid_storage_key, storage_file_path,
+        validate_export_target, write_local_storage, write_text_file,
+    };
     use std::fs;
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1432,7 +1683,8 @@ mod tests {
             "../escape.png".into(),
             md_path.to_string_lossy().to_string(),
             vault.to_string_lossy().to_string(),
-        ).unwrap_err();
+        )
+        .unwrap_err();
 
         assert!(err.contains("Invalid broken image name"));
         fs::remove_dir_all(dir).unwrap();
@@ -1456,7 +1708,8 @@ mod tests {
             "fixed.png".into(),
             md_path.to_string_lossy().to_string(),
             vault.to_string_lossy().to_string(),
-        ).unwrap_err();
+        )
+        .unwrap_err();
 
         assert!(err.contains("Markdown path must stay inside vault"));
         fs::remove_dir_all(dir).unwrap();
@@ -1478,7 +1731,8 @@ mod tests {
             "fixed.png".into(),
             md_path.to_string_lossy().to_string(),
             vault.to_string_lossy().to_string(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let expected = md_dir.join("attachments").join("fixed.png");
         assert_eq!(Path::new(&target), expected.as_path());
@@ -1502,7 +1756,8 @@ mod tests {
             "new.png".into(),
             vault.to_string_lossy().to_string(),
             std::collections::HashMap::new(),
-        ).unwrap_err();
+        )
+        .unwrap_err();
 
         assert!(err.contains("Source image must stay inside vault"));
         fs::remove_dir_all(dir).unwrap();
@@ -1522,14 +1777,18 @@ mod tests {
         fs::write(&outside_md, "![[old.png]]").unwrap();
 
         let mut md_refs = std::collections::HashMap::new();
-        md_refs.insert(outside_md.to_string_lossy().to_string(), vec!["old.png".to_string()]);
+        md_refs.insert(
+            outside_md.to_string_lossy().to_string(),
+            vec!["old.png".to_string()],
+        );
 
         let err = super::rename_image(
             old_path.to_string_lossy().to_string(),
             "new.png".into(),
             vault.to_string_lossy().to_string(),
             md_refs,
-        ).unwrap_err();
+        )
+        .unwrap_err();
 
         assert!(err.contains("Markdown path must stay inside vault"));
         assert!(old_path.exists());
@@ -1550,14 +1809,18 @@ mod tests {
         fs::write(&note_path, "![[old.png]]").unwrap();
 
         let mut md_refs = std::collections::HashMap::new();
-        md_refs.insert(note_path.to_string_lossy().to_string(), vec!["old.png".to_string()]);
+        md_refs.insert(
+            note_path.to_string_lossy().to_string(),
+            vec!["old.png".to_string()],
+        );
 
         let summary = super::rename_image(
             old_path.to_string_lossy().to_string(),
             "new.png".into(),
             vault.to_string_lossy().to_string(),
             md_refs,
-        ).unwrap();
+        )
+        .unwrap();
 
         let new_path = image_dir.join("new.png");
         assert_eq!(Path::new(&summary.new_path), new_path.as_path());
@@ -1583,7 +1846,8 @@ mod tests {
             keep.to_string_lossy().to_string(),
             vec![remove.to_string_lossy().to_string()],
             vault.to_string_lossy().to_string(),
-        ).unwrap_err();
+        )
+        .unwrap_err();
 
         assert!(err.contains("Keep file must stay inside vault"));
         fs::remove_dir_all(dir).unwrap();
@@ -1606,7 +1870,8 @@ mod tests {
             keep.to_string_lossy().to_string(),
             vec![remove.to_string_lossy().to_string()],
             vault.to_string_lossy().to_string(),
-        ).unwrap_err();
+        )
+        .unwrap_err();
 
         assert!(err.contains("Remove file must stay inside vault"));
         assert!(remove.exists());
@@ -1632,7 +1897,8 @@ mod tests {
             keep.to_string_lossy().to_string(),
             vec![remove.to_string_lossy().to_string()],
             vault.to_string_lossy().to_string(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(summary.deleted_files, 1);
         assert_eq!(summary.updated_mds, 1);
@@ -1656,7 +1922,8 @@ mod tests {
             "webp".into(),
             80,
             vault.to_string_lossy().to_string(),
-        ).unwrap_err();
+        )
+        .unwrap_err();
 
         assert!(err.contains("Source image must stay inside vault"));
         fs::remove_dir_all(dir).unwrap();
@@ -1672,7 +1939,8 @@ mod tests {
             "webp".into(),
             80,
             vault.to_string_lossy().to_string(),
-        ).unwrap_err();
+        )
+        .unwrap_err();
 
         assert!(err.contains("Vault path does not exist"));
         fs::remove_dir_all(dir).unwrap();
@@ -1691,7 +1959,8 @@ mod tests {
         let err = super::validate_open_path_for_tests(
             file.to_string_lossy().to_string(),
             vault.to_string_lossy().to_string(),
-        ).unwrap_err();
+        )
+        .unwrap_err();
 
         assert!(err.contains("Open target must stay inside vault"));
         fs::remove_dir_all(dir).unwrap();
@@ -1710,7 +1979,8 @@ mod tests {
         let err = super::validate_open_path_for_tests(
             file.to_string_lossy().to_string(),
             vault.to_string_lossy().to_string(),
-        ).unwrap_err();
+        )
+        .unwrap_err();
 
         assert!(err.contains("Open target must stay inside vault"));
         fs::remove_dir_all(dir).unwrap();
@@ -1728,7 +1998,8 @@ mod tests {
         let validated = super::validate_open_path_for_tests(
             file.to_string_lossy().to_string(),
             vault.to_string_lossy().to_string(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(validated, file.canonicalize().unwrap());
         fs::remove_dir_all(dir).unwrap();
@@ -1749,7 +2020,8 @@ mod tests {
             vec![source.to_string_lossy().to_string()],
             dest.to_string_lossy().to_string(),
             vault.to_string_lossy().to_string(),
-        ).unwrap_err();
+        )
+        .unwrap_err();
 
         assert!(err.contains("Backup source must stay inside vault"));
         fs::remove_dir_all(dir).unwrap();
@@ -1770,7 +2042,8 @@ mod tests {
             vec![source.to_string_lossy().to_string()],
             dest.to_string_lossy().to_string(),
             vault.to_string_lossy().to_string(),
-        ).unwrap_err();
+        )
+        .unwrap_err();
 
         assert!(err.contains("Backup source must stay inside vault"));
         fs::remove_dir_all(dir).unwrap();
@@ -1790,7 +2063,8 @@ mod tests {
             vec![source.to_string_lossy().to_string()],
             dest.to_string_lossy().to_string(),
             vault.to_string_lossy().to_string(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(summary.copied, 1);
         assert!(dest.join("image.png").exists());
@@ -1802,7 +2076,8 @@ mod tests {
         let dir = temp_dir();
         let vault = dir.join("missing-vault");
 
-        let err = super::find_duplicates_for_tests(vault.to_string_lossy().to_string()).unwrap_err();
+        let err =
+            super::find_duplicates_for_tests(vault.to_string_lossy().to_string()).unwrap_err();
 
         assert!(err.contains("Vault path does not exist"));
         fs::remove_dir_all(dir).unwrap();
@@ -1841,7 +2116,8 @@ mod tests {
             "webp".into(),
             80,
             vault.to_string_lossy().to_string(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(summary.converted, 0);
         assert_eq!(summary.skipped, 1);
@@ -1900,7 +2176,8 @@ mod tests {
                 return Err("forced failure".to_string());
             }
             fs::write(path, content).map_err(|e| e.to_string())
-        }).unwrap_err();
+        })
+        .unwrap_err();
 
         assert_eq!(err, "forced failure");
         assert_eq!(fs::read_to_string(&first).unwrap(), "![[old.png]]");

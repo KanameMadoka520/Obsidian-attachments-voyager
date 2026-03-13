@@ -2,24 +2,27 @@ import { useLang } from '../App'
 
 interface MigratePlanTableProps {
   items: string[]
+  title?: string
+  columnLabel?: string
+  emptyText?: string
 }
 
-function MigratePlanTable({ items }: MigratePlanTableProps) {
+function MigratePlanTable({ items, title, columnLabel, emptyText }: MigratePlanTableProps) {
   const tr = useLang()
   return (
     <section className="card">
-      <h2 className="card-title">{tr.migratePlanTitle}</h2>
+      <h2 className="card-title">{title ?? tr.migratePlanTitle}</h2>
       <div className="table-wrapper">
         <table className="data-table">
           <thead>
             <tr>
-              <th>{tr.migratePlanColMapping}</th>
+              <th>{columnLabel ?? tr.migratePlanColMapping}</th>
             </tr>
           </thead>
           <tbody>
             {items.length === 0 ? (
               <tr>
-                <td className="empty-state">{tr.migratePlanEmpty}</td>
+                <td className="empty-state">{emptyText ?? tr.migratePlanEmpty}</td>
               </tr>
             ) : (
               items.map((item, index) => (

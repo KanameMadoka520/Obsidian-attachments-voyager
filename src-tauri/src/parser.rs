@@ -47,7 +47,10 @@ fn strip_code(md: &str) -> String {
                 // Skip until closing backtick
                 let mut found_close = false;
                 for inner in chars.by_ref() {
-                    if inner == '`' { found_close = true; break; }
+                    if inner == '`' {
+                        found_close = true;
+                        break;
+                    }
                 }
                 if !found_close {
                     // Unclosed backtick — treat as literal

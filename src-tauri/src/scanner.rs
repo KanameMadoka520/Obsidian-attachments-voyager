@@ -28,7 +28,9 @@ pub fn scan_vault_with_thumbs(
 
     let unique_paths: Vec<String> = {
         let mut seen = std::collections::HashSet::new();
-        result.issues.iter()
+        result
+            .issues
+            .iter()
             .filter(|i| i.r#type != "broken" && seen.insert(i.image_path.clone()))
             .map(|i| i.image_path.clone())
             .collect()
@@ -51,7 +53,8 @@ pub fn scan_vault_with_thumbs(
         })
         .collect();
 
-    let by_image_path: HashMap<String, Option<thumb_cache::MultiThumbnailResult>> = results.into_iter().collect();
+    let by_image_path: HashMap<String, Option<thumb_cache::MultiThumbnailResult>> =
+        results.into_iter().collect();
 
     for issue in result.issues.iter_mut() {
         if let Some(Some(multi)) = by_image_path.get(&issue.image_path) {
@@ -63,7 +66,11 @@ pub fn scan_vault_with_thumbs(
     Ok(result)
 }
 
-pub fn scan_vault(root: &Path, progress: Option<&ProgressFn>, prev_index: Option<&ScanIndex>) -> Result<ScanResult> {
+pub fn scan_vault(
+    root: &Path,
+    progress: Option<&ProgressFn>,
+    prev_index: Option<&ScanIndex>,
+) -> Result<ScanResult> {
     if !root.exists() {
         anyhow::bail!("vault root does not exist")
     }
@@ -170,8 +177,11 @@ pub fn scan_vault(root: &Path, progress: Option<&ProgressFn>, prev_index: Option
                     thumbnail_path: None,
                     thumbnail_paths: None,
                     file_size: fs::metadata(img).map(|m| m.len()).ok(),
-                    file_mtime: fs::metadata(img).and_then(|m| m.modified()).ok()
-                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs()),
+                    file_mtime: fs::metadata(img)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs()),
                 });
             }
         }
@@ -202,8 +212,11 @@ pub fn scan_vault(root: &Path, progress: Option<&ProgressFn>, prev_index: Option
                         thumbnail_path: None,
                         thumbnail_paths: None,
                         file_size: fs::metadata(found).map(|m| m.len()).ok(),
-                        file_mtime: fs::metadata(found).and_then(|m| m.modified()).ok()
-                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs()),
+                        file_mtime: fs::metadata(found)
+                            .and_then(|m| m.modified())
+                            .ok()
+                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs()),
                     });
                 }
             }
@@ -244,18 +257,26 @@ pub fn scan_vault(root: &Path, progress: Option<&ProgressFn>, prev_index: Option
         file_mtimes.insert(key, mtime);
     }
 
-    let all_images: Vec<crate::models::AttachmentInfo> = image_files.iter().map(|img| {
-        let meta = fs::metadata(img).ok();
-        crate::models::AttachmentInfo {
-            path: img.to_string_lossy().to_string(),
-            file_name: img.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string(),
-            file_size: meta.as_ref().map(|m| m.len()).unwrap_or(0),
-            file_mtime: meta.and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-                .unwrap_or(0),
-        }
-    }).collect();
+    let all_images: Vec<crate::models::AttachmentInfo> = image_files
+        .iter()
+        .map(|img| {
+            let meta = fs::metadata(img).ok();
+            crate::models::AttachmentInfo {
+                path: img.to_string_lossy().to_string(),
+                file_name: img
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string(),
+                file_size: meta.as_ref().map(|m| m.len()).unwrap_or(0),
+                file_mtime: meta
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+            }
+        })
+        .collect();
 
     Ok(ScanResult {
         total_md: md_files.len(),
@@ -269,7 +290,11 @@ pub fn scan_vault(root: &Path, progress: Option<&ProgressFn>, prev_index: Option
     })
 }
 
-fn collect_files(root: &Path, md_files: &mut Vec<PathBuf>, image_files: &mut Vec<PathBuf>) -> Result<()> {
+fn collect_files(
+    root: &Path,
+    md_files: &mut Vec<PathBuf>,
+    image_files: &mut Vec<PathBuf>,
+) -> Result<()> {
     for entry in fs::read_dir(root)? {
         let entry = entry?;
         let path = entry.path();
@@ -313,7 +338,10 @@ fn path_has_attachments_segment(path: &Path) -> bool {
 
 fn is_trash_markdown(path: &Path) -> bool {
     let lower = path.to_string_lossy().to_ascii_lowercase();
-    lower.contains("/.trash/") || lower.contains("\\.trash\\") || lower.contains("/trash/") || lower.contains("\\trash\\")
+    lower.contains("/.trash/")
+        || lower.contains("\\.trash\\")
+        || lower.contains("/trash/")
+        || lower.contains("\\trash\\")
 }
 
 pub fn is_image_ext(path: &Path) -> bool {
@@ -331,10 +359,10 @@ fn is_image(path: &Path) -> bool {
 mod tests {
     use super::scan_vault;
     use std::fs;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir() -> PathBuf {
         let nanos = SystemTime::now()
@@ -383,7 +411,10 @@ mod tests {
         let result = scan_vault(&root, None, None).unwrap();
 
         assert_eq!(result.total_images, 1);
-        assert!(result.all_images.iter().all(|img| !img.path.contains(".worktrees")));
+        assert!(result
+            .all_images
+            .iter()
+            .all(|img| !img.path.contains(".worktrees")));
         fs::remove_dir_all(&root).unwrap();
     }
 

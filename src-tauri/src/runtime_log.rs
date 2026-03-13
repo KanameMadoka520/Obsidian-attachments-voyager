@@ -66,6 +66,18 @@ pub fn list_runtime_logs(limit: usize) -> Vec<RuntimeLogLine> {
         return Vec::new();
     };
 
-    let count = if limit == 0 { guard.len() } else { guard.len().min(limit) };
-    guard.iter().rev().take(count).cloned().collect::<Vec<_>>().into_iter().rev().collect()
+    let count = if limit == 0 {
+        guard.len()
+    } else {
+        guard.len().min(limit)
+    };
+    guard
+        .iter()
+        .rev()
+        .take(count)
+        .cloned()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
 }
