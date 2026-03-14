@@ -70,6 +70,7 @@
 - 在 Debian / Ubuntu 容器内跑 Rust 后端测试需要 WebKitGTK / GTK / libsoup 等系统依赖，并建议使用 rustup 安装较新的 Cargo。
 - Linux/Tauri 构建现已通过仓库内 patch 固化：`src-tauri/Cargo.toml` 使用 `[patch.crates-io]` 指向 `src-tauri/vendor/wry/`。该 vendored `wry` 包含一处 WebKitGTK trait 导入修复，用于保证 Debian 12 环境下 `cargo test` 可通过；在未确认上游依赖已修复并完成回归前，不要移除此 patch。
   - 维护说明见：`docs/maintenance/wry-linux-patch.md`
+- 下一阶段路线设计已落文档：`docs/plans/2026-03-14-next-phase-roadmap-design.md`
 
 #### 仍需关注（非阻塞）
 - 当前已通过页面级懒加载消除主入口的 Vite chunk-size warning；后续如继续扩展图表/画廊功能，仍建议关注 bundle 体积，优先保持非首屏页面按需加载。
