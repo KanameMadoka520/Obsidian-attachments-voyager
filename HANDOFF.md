@@ -57,8 +57,8 @@
 
 #### 主工作区验证结果
 - `npm run build` 通过。
-- `npm test` 通过（9 个测试文件 / 20 个用例）。
-- `cargo test --manifest-path src-tauri/Cargo.toml` 通过（44 个测试）。
+- `npm test` 通过（10 个测试文件 / 21 个用例）。
+- `cargo test --manifest-path src-tauri/Cargo.toml` 通过（46 个测试）。
 - `npm run tauri:build` 通过（当前环境已验证 Debian 12 下可产出 `.deb` / `.rpm` / `.AppImage`；历史记录中 Windows 下可产出 MSI + NSIS）。
 - 前端回归测试覆盖（通过）：
   - `app-gallery-persistence.test.tsx`
@@ -96,7 +96,7 @@ Phase 8–11 的代码已存在于工作区，但尚未提交。
 
 #### 交接说明（可直接转给下一位开发者）
 
-- 当前工作区的自动化验证已通过：`npm test`（9 个测试文件 / 20 个用例）与 `cargo test --manifest-path src-tauri/Cargo.toml`（44 个测试）。
+- 当前工作区的自动化验证已通过：`npm test`（10 个测试文件 / 21 个用例）与 `cargo test --manifest-path src-tauri/Cargo.toml`（46 个测试）。
 - `HANDOFF.md`、`README.md`、`CONTRIBUTING.md` 已同步更新；下一步请优先查看本文件中的「下一步清单（推荐）」。
 - 当前最值得优先做的后续工作不是继续改代码，而是执行 smoke checklist，并按建议拆分 Phase 8–11 的未提交改动。
 - Broken 拖拽修复已明确列为延后高风险检查项；当前实现依赖 `File.path`，需要在 Windows 真机/Tauri 环境手工验证。
@@ -111,9 +111,9 @@ Phase 8–11 的代码已存在于工作区，但尚未提交。
 - [ ] 如果你在不同 OS 间切换过：在当前 OS 重新安装前端依赖：`rm -rf node_modules && npm ci`
 
 #### 1) 先跑通验证（任何提交前必须绿）
-- [ ] `npm test`（期望：9 个测试文件 / 20 个用例）
+- [ ] `npm test`（期望：10 个测试文件 / 21 个用例）
 - [ ] `npm run build`（期望：成功；当前主工作区已无 Vite chunk-size warning）
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml`（期望：44 个测试）
+- [ ] `cargo test --manifest-path src-tauri/Cargo.toml`（期望：46 个测试）
 
 #### 1.5) 手工验收烟雾测试（推荐）
 - [ ] 备份（目录 + zip）：选中几张非 broken 图片执行备份流程；核对输出与操作历史。
@@ -208,10 +208,11 @@ Phase 8–11 的代码已存在于工作区，但尚未提交。
 
 ```
 src-tauri/src/
-  main.rs        (expanded)   — 26 Tauri commands, IPC entry points
+  main.rs        (expanded)   — 28 Tauri commands, IPC entry points
   scanner.rs     (343 lines)  — vault scanning, issue detection
   parser.rs      (147 lines)  — Markdown image ref extraction
   models.rs      (44 lines)   — shared structs (ScanIssue, ScanResult, etc.)
+  diagnostic_log.rs (new)     — misplaced fix verification JSONL diagnostics
   thumb_cache.rs (185 lines)  — 3-tier WebP thumbnail generation
   ops_log.rs     (166 lines)  — operation history persistence
   migrate.rs     (expanded)   — note migration + descendant attachments preprocessing
@@ -350,7 +351,7 @@ cargo tauri build        # 生产构建
 
 ### 测试
 
-`src/__tests__/` 当前共 9 个测试文件：
+`src/__tests__/` 当前共 10 个测试文件：
 - `smoke.test.ts` — 基础导入检查
 - `types-contract.test.ts` — 类型契约兼容性
 - `cargo-custom-protocol.test.ts` — Cargo.toml feature 检查
@@ -360,6 +361,7 @@ cargo tauri build        # 生产构建
 - `app-gallery-persistence.test.tsx` — Gallery 在 Tab 切换后仍保留状态
 - `gallery-page.test.tsx` — Gallery 预览一致性 + all-cache 相关行为
 - `sidebar-layout.test.ts` — Sidebar overflow/scroll 样式保护测试
+- `operation-history-panel.test.tsx` — fix 任务诊断入口按钮行为
 
 运行方式：`npm test`
 

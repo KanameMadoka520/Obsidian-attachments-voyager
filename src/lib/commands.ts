@@ -23,3 +23,11 @@ export async function openVaultFile(path: string, vaultPath: string): Promise<vo
 export async function openVaultFileParent(path: string, vaultPath: string): Promise<void> {
   await invoke('open_file_parent', { path, vaultPath })
 }
+
+export async function openDiagnosticsDir(): Promise<void> {
+  await invoke('open_diagnostics_dir')
+}
+
+export async function openMisplacedFixDiagnostic(taskId: string): Promise<void> {
+  await invoke('open_misplaced_fix_diagnostic', { taskId })
+}

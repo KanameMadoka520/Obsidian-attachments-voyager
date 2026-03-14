@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { OperationTask, RuntimeLogLine } from '../types'
 import { useLang } from '../App'
+import { openDiagnosticsDir, openMisplacedFixDiagnostic } from '../lib/commands'
 
 interface StatusBarProps {
   orphanCount: number
@@ -21,6 +22,7 @@ function StatusBar({
   const tr = useLang()
   const [expanded, setExpanded] = useState(false)
   const [drawerTab, setDrawerTab] = useState<'logs' | 'history'>('logs')
+  const [historyMessage, setHistoryMessage] = useState('')
   const latest = logs.length > 0 ? logs[logs.length - 1] : null
   const taskTypeLabel = (taskType: string) => ({
     fix: tr.statusTaskTypeFix,
@@ -32,6 +34,26 @@ function StatusBar({
     delete: tr.statusActionDelete,
     'delete-dir': tr.statusActionDelete,
   } as Record<string, string>)[action] ?? action
+
+  const handleOpenDiagnostic = async (taskId: string) => {
+    try {
+      await openMisplacedFixDiagnostic(taskId)
+      setHistoryMessage('')
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setHistoryMessage(tr.operationHistoryDiagnosticFailed.replace('{message}', msg))
+    }
+  }
+
+  const handleOpenDiagnosticDir = async () => {
+    try {
+      await openDiagnosticsDir()
+      setHistoryMessage('')
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setHistoryMessage(tr.operationHistoryDiagnosticFailed.replace('{message}', msg))
+    }
+  }
 
   return (
     <div className={`status-bar ${expanded ? 'expanded' : ''}`}>
@@ -107,28 +129,50 @@ function StatusBar({
               tasks.length === 0 ? (
                 <div className="status-empty">{tr.statusNoHistory}</div>
               ) : (
-                tasks.map((task) => (
-                  <div key={task.taskId} className="history-task">
-                    <div className="history-task-header">
-                      <span className="history-task-type">{taskTypeLabel(task.taskType)}</span>
-                      <span className="history-task-time">{task.createdAt}</span>
-                      <span className={`history-task-status status-${task.status}`}>{
-                        ({ applied: tr.statusApplied } as Record<string, string>)[task.status] ?? task.status
-                      }</span>
+                <>
+                  {historyMessage && (
+                    <div className="status-empty" style={{ color: 'var(--danger-color)', textAlign: 'left' }}>
+                      {historyMessage}
                     </div>
-                    <div className="history-entries">
-                      {task.entries.map((entry) => (
-                        <div key={entry.entryId} className="history-entry">
-                          <span className="history-entry-action">{actionLabel(entry.action)}</span>
-                          <span className="history-entry-path">{entry.filePath}</span>
-                          <span className={`history-entry-status status-${entry.status}`}>{
-                            ({ applied: tr.statusApplied, failed: tr.statusFailed, skipped: tr.statusSkipped } as Record<string, string>)[entry.status] ?? entry.status
-                          }</span>
-                        </div>
-                      ))}
+                  )}
+                  {tasks.map((task) => (
+                    <div key={task.taskId} className="history-task">
+                      <div className="history-task-header">
+                        <span className="history-task-type">{taskTypeLabel(task.taskType)}</span>
+                        <span className="history-task-time">{task.createdAt}</span>
+                        <span className={`history-task-status status-${task.status}`}>{
+                          ({ applied: tr.statusApplied } as Record<string, string>)[task.status] ?? task.status
+                        }</span>
+                        {task.taskType === 'fix' && (
+                          <div className="history-task-actions">
+                            <button type="button" className="history-task-btn" onClick={() => handleOpenDiagnostic(task.taskId)}>
+                              {tr.operationHistoryOpenDiagnostic}
+                            </button>
+                            <button type="button" className="history-task-btn" onClick={handleOpenDiagnosticDir}>
+                              {tr.operationHistoryOpenDiagnosticDir}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <div className="history-entries">
+                        {task.entries.map((entry) => (
+                          <div key={entry.entryId} className="history-entry">
+                            <span className="history-entry-action">{actionLabel(entry.action)}</span>
+                            <div className="history-entry-main">
+                              <span className="history-entry-path">{entry.filePath}</span>
+                              {entry.message && (
+                                <span className="history-entry-message">{entry.message}</span>
+                              )}
+                            </div>
+                            <span className={`history-entry-status status-${entry.status}`}>{
+                              ({ applied: tr.statusApplied, failed: tr.statusFailed, skipped: tr.statusSkipped } as Record<string, string>)[entry.status] ?? entry.status
+                            }</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))
+                  ))}
+                </>
               )
             )}
           </div>

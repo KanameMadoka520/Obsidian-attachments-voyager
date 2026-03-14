@@ -161,6 +161,7 @@ test('fix requires selecting issues and supports select all', async () => {
       'fix_issues',
       expect.objectContaining({
         policy: 'renameAll',
+        vaultRoot: 'D:/vault',
       })
     )
   })

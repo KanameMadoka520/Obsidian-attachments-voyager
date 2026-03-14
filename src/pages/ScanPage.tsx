@@ -496,6 +496,7 @@ function ScanPage({ conflictPolicy, onScanComplete }: ScanPageProps) {
       const summary = await invoke<FixSummary>('fix_issues', {
         issues: selectedIssues as AuditIssue[],
         policy,
+        vaultRoot: vaultPath,
       })
       setConfirmOpen(false)
       setError(tr.scanFixComplete.replace('{moved}', String(summary.moved)).replace('{deleted}', String(summary.deleted)).replace('{skipped}', String(summary.skipped)))

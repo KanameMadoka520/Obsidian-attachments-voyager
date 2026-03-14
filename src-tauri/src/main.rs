@@ -6,6 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir;
 
+pub mod diagnostic_log;
 pub mod migrate;
 pub mod models;
 pub mod ops_log;
@@ -23,6 +24,28 @@ use ops_log::{
 };
 use runtime_log::{append_runtime_log, list_runtime_logs, RuntimeLogLine};
 
+#[derive(Debug, Clone)]
+struct MisplacedFixAttempt {
+    entry_id: String,
+    issue: ScanIssue,
+    source_path: String,
+    expected_target: String,
+    resolved_target: String,
+    reference_filename: String,
+    conflict_policy: ConflictPolicy,
+    source_exists_before: bool,
+    target_exists_before: bool,
+}
+
+#[derive(Debug, Clone)]
+struct MisplacedFixVerification {
+    status: String,
+    reason: String,
+    residual_issue_type: Option<String>,
+    residual_issue_path: Option<String>,
+    residual_issue_reason: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FixSummary {
@@ -38,6 +61,193 @@ struct FixSummary {
 struct CacheClearSummary {
     removed: usize,
     cache_dir: String,
+}
+
+fn open_with_system(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+fn basename_from_path(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn issue_matches_reference(
+    issue: &ScanIssue,
+    md_path: Option<&str>,
+    reference_filename: &str,
+) -> bool {
+    if issue.md_path.as_deref() != md_path {
+        return false;
+    }
+
+    let image_matches = issue.image_path == reference_filename
+        || basename_from_path(&issue.image_path) == reference_filename;
+    let target_matches = issue
+        .suggested_target
+        .as_deref()
+        .map(|target| basename_from_path(target) == reference_filename)
+        .unwrap_or(false);
+
+    image_matches || target_matches
+}
+
+fn verify_misplaced_fix_attempt(
+    attempt: &MisplacedFixAttempt,
+    post_scan: Option<&ScanResult>,
+) -> MisplacedFixVerification {
+    let source_exists_after = Path::new(&attempt.source_path).exists();
+    let target_exists_after = Path::new(&attempt.resolved_target).exists();
+
+    if !target_exists_after {
+        return MisplacedFixVerification {
+            status: "target_missing_after_move".to_string(),
+            reason: format!("修复后目标文件不存在：{}", attempt.resolved_target),
+            residual_issue_type: None,
+            residual_issue_path: None,
+            residual_issue_reason: None,
+        };
+    }
+
+    if source_exists_after {
+        return MisplacedFixVerification {
+            status: "source_still_exists_after_move".to_string(),
+            reason: format!("修复后源文件仍然存在：{}", attempt.source_path),
+            residual_issue_type: None,
+            residual_issue_path: None,
+            residual_issue_reason: None,
+        };
+    }
+
+    let Some(post_scan) = post_scan else {
+        return MisplacedFixVerification {
+            status: "verification_skipped".to_string(),
+            reason: "修复已执行，但未进行复核".to_string(),
+            residual_issue_type: None,
+            residual_issue_path: None,
+            residual_issue_reason: None,
+        };
+    };
+
+    if let Some(residual_issue) = post_scan.issues.iter().find(|issue| {
+        matches!(issue.r#type.as_str(), "misplaced" | "broken")
+            && issue_matches_reference(
+                issue,
+                attempt.issue.md_path.as_deref(),
+                &attempt.reference_filename,
+            )
+    }) {
+        let reason = match residual_issue.r#type.as_str() {
+            "misplaced" => format!(
+                "修复后仍为错位：扫描仍将 {} 判定为 misplaced",
+                residual_issue.image_path
+            ),
+            "broken" => format!(
+                "修复后变为断链：Markdown 仍引用缺失文件 {}",
+                residual_issue.image_path
+            ),
+            _ => "修复后仍存在相关问题".to_string(),
+        };
+
+        return MisplacedFixVerification {
+            status: match residual_issue.r#type.as_str() {
+                "misplaced" => "still_misplaced",
+                "broken" => "became_broken",
+                _ => "verification_residual_issue",
+            }
+            .to_string(),
+            reason,
+            residual_issue_type: Some(residual_issue.r#type.clone()),
+            residual_issue_path: Some(residual_issue.image_path.clone()),
+            residual_issue_reason: Some(residual_issue.reason.clone()),
+        };
+    }
+
+    if let Some(orphan_issue) = post_scan
+        .issues
+        .iter()
+        .find(|issue| issue.r#type == "orphan" && issue.image_path == attempt.resolved_target)
+    {
+        return MisplacedFixVerification {
+            status: "became_orphan".to_string(),
+            reason: format!("修复后目标文件未被引用：{}", orphan_issue.image_path),
+            residual_issue_type: Some(orphan_issue.r#type.clone()),
+            residual_issue_path: Some(orphan_issue.image_path.clone()),
+            residual_issue_reason: Some(orphan_issue.reason.clone()),
+        };
+    }
+
+    let renamed_target = basename_from_path(&attempt.resolved_target) != attempt.reference_filename;
+    let reason = if renamed_target {
+        format!(
+            "修复后复核通过：文件已移动到 {}。本次因重名改名共存，请确认引用是否符合预期",
+            attempt.resolved_target
+        )
+    } else {
+        format!(
+            "修复后复核通过：文件已位于期望位置 {}",
+            attempt.resolved_target
+        )
+    };
+
+    MisplacedFixVerification {
+        status: "verified_fixed".to_string(),
+        reason,
+        residual_issue_type: None,
+        residual_issue_path: None,
+        residual_issue_reason: None,
+    }
+}
+
+fn append_misplaced_fix_diagnostic(
+    task_id: &str,
+    attempt: &MisplacedFixAttempt,
+    verification: &MisplacedFixVerification,
+) {
+    let source_exists_after = Path::new(&attempt.source_path).exists();
+    let target_exists_after = Path::new(&attempt.resolved_target).exists();
+
+    let record = diagnostic_log::MisplacedFixDiagnosticRecord::new(
+        task_id.to_string(),
+        attempt.entry_id.clone(),
+        attempt.issue.md_path.clone(),
+        attempt.issue.image_path.clone(),
+        attempt.source_path.clone(),
+        attempt.expected_target.clone(),
+        attempt.resolved_target.clone(),
+        attempt.reference_filename.clone(),
+        format!("{:?}", attempt.conflict_policy),
+        attempt.source_exists_before,
+        attempt.target_exists_before,
+        source_exists_after,
+        target_exists_after,
+        verification.status.clone(),
+        verification.reason.clone(),
+        verification.residual_issue_type.clone(),
+        verification.residual_issue_path.clone(),
+        verification.residual_issue_reason.clone(),
+    );
+
+    diagnostic_log::append_misplaced_fix_record(task_id, &record);
 }
 
 #[tauri::command]
@@ -141,9 +351,11 @@ fn flatten_attachments(
 fn fix_issues(
     issues: Vec<ScanIssue>,
     policy: Option<ConflictPolicy>,
+    vault_root: Option<String>,
 ) -> Result<FixSummary, String> {
     let policy = policy.unwrap_or_default();
     let mut task = create_task("fix", policy);
+    let mut misplaced_attempts: Vec<MisplacedFixAttempt> = Vec::new();
 
     let mut moved = 0usize;
     let mut deleted = 0usize;
@@ -158,11 +370,15 @@ fn fix_issues(
                     continue;
                 };
                 let target = Path::new(target_path);
+                let entry_id = ops_log::next_id("entry");
+                let source_exists_before = source.exists();
+                let target_exists_before = target.exists();
+                let reference_filename = basename_from_path(&issue.image_path);
 
-                if !source.exists() {
+                if !source_exists_before {
                     skipped += 1;
                     task.entries.push(OperationEntry {
-                        entry_id: ops_log::next_id("entry"),
+                        entry_id: entry_id.clone(),
                         file_path: issue.image_path.clone(),
                         action: "move".to_string(),
                         source: issue.image_path.clone(),
@@ -170,6 +386,25 @@ fn fix_issues(
                         status: EntryStatus::Skipped,
                         message: Some("无法找到该文件，请自行检查".to_string()),
                     });
+                    let attempt = MisplacedFixAttempt {
+                        entry_id,
+                        issue: issue.clone(),
+                        source_path: source.to_string_lossy().to_string(),
+                        expected_target: target_path.to_string(),
+                        resolved_target: target_path.to_string(),
+                        reference_filename,
+                        conflict_policy: task.policy.clone(),
+                        source_exists_before,
+                        target_exists_before,
+                    };
+                    let verification = MisplacedFixVerification {
+                        status: "skipped_missing_source".to_string(),
+                        reason: "源文件不存在，已跳过".to_string(),
+                        residual_issue_type: None,
+                        residual_issue_path: None,
+                        residual_issue_reason: None,
+                    };
+                    append_misplaced_fix_diagnostic(&task.task_id, &attempt, &verification);
                     continue;
                 }
 
@@ -190,76 +425,78 @@ fn fix_issues(
                     }
                 }
 
-                if target.exists() {
-                    match task.policy {
-                        ConflictPolicy::OverwriteAll => {
-                            if target.is_file() {
-                                fs::remove_file(target).map_err(|e| e.to_string())?;
-                            }
-                        }
-                        ConflictPolicy::RenameAll => {
-                            let mut i = 1usize;
-                            let mut candidate = target.to_path_buf();
-                            while candidate.exists() {
-                                let stem = target
-                                    .file_stem()
-                                    .and_then(|s| s.to_str())
-                                    .unwrap_or("file");
-                                let ext = target.extension().and_then(|s| s.to_str()).unwrap_or("");
-                                let parent = target.parent().unwrap_or(Path::new("."));
-                                let name = if ext.is_empty() {
-                                    format!("{stem} ({i})")
-                                } else {
-                                    format!("{stem} ({i}).{ext}")
+                let resolved_target = if target.exists() && target.is_dir() {
+                    return Err("目标路径被同名目录占用，请自行检查".to_string());
+                } else {
+                    match conflict_target(target, &task.policy) {
+                        Ok(path) => path,
+                        Err(err) => {
+                            let message = err.to_string();
+                            if message.contains("CONFLICT:") {
+                                skipped += 1;
+                                task.entries.push(OperationEntry {
+                                    entry_id: entry_id.clone(),
+                                    file_path: issue.image_path.clone(),
+                                    action: "move".to_string(),
+                                    source: issue.image_path.clone(),
+                                    target: target_path.to_string(),
+                                    status: EntryStatus::Skipped,
+                                    message: Some("冲突：请在前端选择处理方式".to_string()),
+                                });
+                                let attempt = MisplacedFixAttempt {
+                                    entry_id,
+                                    issue: issue.clone(),
+                                    source_path: source.to_string_lossy().to_string(),
+                                    expected_target: target_path.to_string(),
+                                    resolved_target: target_path.to_string(),
+                                    reference_filename,
+                                    conflict_policy: task.policy.clone(),
+                                    source_exists_before,
+                                    target_exists_before,
                                 };
-                                candidate = parent.join(name);
-                                i += 1;
+                                let verification = MisplacedFixVerification {
+                                    status: "skipped_conflict_prompt".to_string(),
+                                    reason: "检测到同名冲突，等待前端选择处理方式".to_string(),
+                                    residual_issue_type: None,
+                                    residual_issue_path: None,
+                                    residual_issue_reason: None,
+                                };
+                                append_misplaced_fix_diagnostic(
+                                    &task.task_id,
+                                    &attempt,
+                                    &verification,
+                                );
+                                continue;
                             }
-                            if let Some(parent) = candidate.parent() {
-                                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-                            }
-                            fs::rename(source, &candidate).map_err(|e| e.to_string())?;
-                            moved += 1;
-                            task.entries.push(OperationEntry {
-                                entry_id: ops_log::next_id("entry"),
-                                file_path: issue.image_path.clone(),
-                                action: "move".to_string(),
-                                source: issue.image_path.clone(),
-                                target: candidate.to_string_lossy().to_string(),
-                                status: EntryStatus::Applied,
-                                message: None,
-                            });
-                            continue;
-                        }
-                        ConflictPolicy::PromptEach => {
-                            skipped += 1;
-                            task.entries.push(OperationEntry {
-                                entry_id: ops_log::next_id("entry"),
-                                file_path: issue.image_path.clone(),
-                                action: "move".to_string(),
-                                source: issue.image_path.clone(),
-                                target: target_path.to_string(),
-                                status: EntryStatus::Skipped,
-                                message: Some("冲突：请在前端选择处理方式".to_string()),
-                            });
-                            continue;
+                            return Err(message);
                         }
                     }
-                }
+                };
 
-                if let Some(parent) = target.parent() {
+                if let Some(parent) = resolved_target.parent() {
                     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
                 }
-                fs::rename(source, target).map_err(|e| e.to_string())?;
+                fs::rename(source, &resolved_target).map_err(|e| e.to_string())?;
                 moved += 1;
                 task.entries.push(OperationEntry {
-                    entry_id: ops_log::next_id("entry"),
+                    entry_id: entry_id.clone(),
                     file_path: issue.image_path.clone(),
                     action: "move".to_string(),
                     source: issue.image_path.clone(),
-                    target: target_path.to_string(),
+                    target: resolved_target.to_string_lossy().to_string(),
                     status: EntryStatus::Applied,
                     message: None,
+                });
+                misplaced_attempts.push(MisplacedFixAttempt {
+                    entry_id,
+                    issue: issue.clone(),
+                    source_path: source.to_string_lossy().to_string(),
+                    expected_target: target_path.to_string(),
+                    resolved_target: resolved_target.to_string_lossy().to_string(),
+                    reference_filename,
+                    conflict_policy: task.policy.clone(),
+                    source_exists_before,
+                    target_exists_before,
                 });
             }
             "orphan" => {
@@ -293,6 +530,69 @@ fn fix_issues(
         }
     }
 
+    let verified_vault_root = vault_root.as_deref().filter(|root| !root.trim().is_empty());
+
+    let post_scan_result = if misplaced_attempts.is_empty() {
+        None
+    } else if let Some(vault_root) = verified_vault_root {
+        match scanner::scan_vault(Path::new(vault_root), None, None) {
+            Ok(result) => Some(result),
+            Err(err) => {
+                append_runtime_log(
+                    "warn",
+                    format!("fix_issues verification scan failed: {err}"),
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    for attempt in &misplaced_attempts {
+        let verification = if verified_vault_root.is_none() {
+            MisplacedFixVerification {
+                status: "verification_skipped".to_string(),
+                reason: "修复已执行，但未提供 vault 路径用于复核".to_string(),
+                residual_issue_type: None,
+                residual_issue_path: None,
+                residual_issue_reason: None,
+            }
+        } else if post_scan_result.is_none() {
+            MisplacedFixVerification {
+                status: "verification_scan_failed".to_string(),
+                reason: "修复已执行，但复核扫描失败".to_string(),
+                residual_issue_type: None,
+                residual_issue_path: None,
+                residual_issue_reason: None,
+            }
+        } else {
+            verify_misplaced_fix_attempt(attempt, post_scan_result.as_ref())
+        };
+
+        if let Some(entry) = task
+            .entries
+            .iter_mut()
+            .find(|entry| entry.entry_id == attempt.entry_id)
+        {
+            entry.message = Some(verification.reason.clone());
+        }
+
+        let level = if verification.status == "verified_fixed" {
+            "info"
+        } else {
+            "warn"
+        };
+        append_runtime_log(
+            level,
+            format!(
+                "misplaced_fix_verify entry={} status={} target={}",
+                attempt.entry_id, verification.status, attempt.resolved_target
+            ),
+        );
+        append_misplaced_fix_diagnostic(&task.task_id, attempt, &verification);
+    }
+
     task.status = TaskStatus::Applied;
     save_task(task.clone());
 
@@ -318,23 +618,7 @@ fn list_operation_history() -> Vec<ops_log::OperationTask> {
 #[tauri::command]
 fn open_file(path: String, vault_path: String) -> Result<(), String> {
     let validated = validate_open_path(Path::new(&path), Path::new(&vault_path))?;
-
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(&validated)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&validated)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-
+    open_with_system(&validated)?;
     Ok(())
 }
 
@@ -344,24 +628,27 @@ fn open_file_parent(path: String, vault_path: String) -> Result<(), String> {
     let Some(parent) = validated.parent() else {
         return Err("无法找到该文件，请自行检查".to_string());
     };
-
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(parent)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(parent)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-
+    open_with_system(parent)?;
     Ok(())
+}
+
+#[tauri::command]
+fn open_diagnostics_dir() -> Result<String, String> {
+    let dir = diagnostic_log::diagnostics_dir_path();
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    open_with_system(&dir)?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn open_misplaced_fix_diagnostic(task_id: String) -> Result<String, String> {
+    let path = diagnostic_log::misplaced_fix_task_file_path(&task_id)
+        .ok_or("Invalid diagnostic task id".to_string())?;
+    if !path.exists() {
+        return Err("未找到该任务的 Misplaced 诊断文件".to_string());
+    }
+    open_with_system(&path)?;
+    Ok(path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -1568,6 +1855,8 @@ fn main() {
             list_operation_history,
             open_file,
             open_file_parent,
+            open_diagnostics_dir,
+            open_misplaced_fix_diagnostic,
             get_runtime_logs,
             read_local_storage,
             write_local_storage,
@@ -1592,9 +1881,13 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_allowed_export_extension, is_valid_storage_key, storage_file_path,
-        validate_export_target, write_local_storage, write_text_file,
+        basename_from_path, fix_issues, is_allowed_export_extension, is_valid_storage_key,
+        storage_file_path, validate_export_target, verify_misplaced_fix_attempt,
+        write_local_storage, write_text_file, MisplacedFixAttempt,
     };
+    use crate::diagnostic_log;
+    use crate::models::{ScanIndex, ScanIssue, ScanResult};
+    use crate::ops_log::ConflictPolicy;
     use std::fs;
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1665,6 +1958,116 @@ mod tests {
     fn write_local_storage_rejects_invalid_key() {
         let err = write_local_storage("../escape".into(), "{}".into()).unwrap_err();
         assert_eq!(err, "Invalid storage key");
+    }
+
+    #[test]
+    fn verify_misplaced_fix_detects_broken_residual_issue() {
+        let dir = temp_dir();
+        let source = dir.join("other/attachments/x.png");
+        let target = dir.join("notes/attachments/x.png");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(&target, b"img").unwrap();
+
+        let attempt = MisplacedFixAttempt {
+            entry_id: "entry-1".to_string(),
+            issue: ScanIssue {
+                id: "issue-1".to_string(),
+                r#type: "misplaced".to_string(),
+                md_path: Some("D:/vault/notes/note.md".to_string()),
+                image_path: source.to_string_lossy().to_string(),
+                reason: "wrong dir".to_string(),
+                suggested_target: Some(target.to_string_lossy().to_string()),
+                thumbnail_path: None,
+                thumbnail_paths: None,
+                file_size: None,
+                file_mtime: None,
+            },
+            source_path: source.to_string_lossy().to_string(),
+            expected_target: target.to_string_lossy().to_string(),
+            resolved_target: target.to_string_lossy().to_string(),
+            reference_filename: basename_from_path(&source.to_string_lossy()),
+            conflict_policy: ConflictPolicy::RenameAll,
+            source_exists_before: true,
+            target_exists_before: false,
+        };
+
+        let post_scan = ScanResult {
+            total_md: 1,
+            total_images: 0,
+            issues: vec![ScanIssue {
+                id: "broken-1".to_string(),
+                r#type: "broken".to_string(),
+                md_path: Some("D:/vault/notes/note.md".to_string()),
+                image_path: "x.png".to_string(),
+                reason: "missing".to_string(),
+                suggested_target: None,
+                thumbnail_path: None,
+                thumbnail_paths: None,
+                file_size: None,
+                file_mtime: None,
+            }],
+            scan_index: ScanIndex::default(),
+            all_images: Vec::new(),
+        };
+
+        let verification = verify_misplaced_fix_attempt(&attempt, Some(&post_scan));
+        assert_eq!(verification.status, "became_broken");
+        assert!(verification.reason.contains("断链"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn fix_issues_adds_verification_message_for_misplaced_move() {
+        let dir = temp_dir();
+        let vault = dir.join("vault");
+        let diagnostics_dir = dir.join("diagnostics");
+        let notes_dir = vault.join("notes");
+        let wrong_dir = vault.join("other/attachments");
+        let right_dir = notes_dir.join("attachments");
+        let note_path = notes_dir.join("note.md");
+        let wrong_image = wrong_dir.join("x.png");
+        let target_image = right_dir.join("x.png");
+
+        std::env::set_var("VOYAGER_DIAGNOSTICS_DIR", &diagnostics_dir);
+        fs::create_dir_all(&wrong_dir).unwrap();
+        fs::create_dir_all(&notes_dir).unwrap();
+        fs::write(&note_path, "![[x.png]]").unwrap();
+        fs::write(&wrong_image, b"img").unwrap();
+
+        let issue = ScanIssue {
+            id: "misplaced-1".to_string(),
+            r#type: "misplaced".to_string(),
+            md_path: Some(note_path.to_string_lossy().to_string()),
+            image_path: wrong_image.to_string_lossy().to_string(),
+            reason: "wrong dir".to_string(),
+            suggested_target: Some(target_image.to_string_lossy().to_string()),
+            thumbnail_path: None,
+            thumbnail_paths: None,
+            file_size: None,
+            file_mtime: None,
+        };
+
+        let summary = fix_issues(
+            vec![issue],
+            Some(ConflictPolicy::RenameAll),
+            Some(vault.to_string_lossy().to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(summary.moved, 1);
+        assert!(target_image.exists());
+        let diagnostic_path =
+            diagnostic_log::misplaced_fix_task_file_path(&summary.task_id).unwrap();
+        assert!(diagnostic_path.exists());
+        assert!(summary.entries[0]
+            .message
+            .as_deref()
+            .unwrap_or("")
+            .contains("复核通过"));
+
+        std::env::remove_var("VOYAGER_DIAGNOSTICS_DIR");
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

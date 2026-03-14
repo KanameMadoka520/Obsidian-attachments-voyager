@@ -131,6 +131,9 @@ export interface Translations {
   operationHistoryCollapse: string
   operationHistoryExpand: string
   operationHistoryEmpty: string
+  operationHistoryOpenDiagnostic: string
+  operationHistoryOpenDiagnosticDir: string
+  operationHistoryDiagnosticFailed: string
 
   // WorkLogPanel
   workLogTitle: string
@@ -522,6 +525,9 @@ const zh: Translations = {
   operationHistoryCollapse: '收起',
   operationHistoryExpand: '展开',
   operationHistoryEmpty: '暂无历史操作',
+  operationHistoryOpenDiagnostic: '打开诊断',
+  operationHistoryOpenDiagnosticDir: '打开诊断目录',
+  operationHistoryDiagnosticFailed: '诊断打开失败：{message}',
 
   // WorkLogPanel
   workLogTitle: '工作日志',
@@ -911,6 +917,9 @@ const en: Translations = {
   operationHistoryCollapse: 'Collapse',
   operationHistoryExpand: 'Expand',
   operationHistoryEmpty: 'No operation history',
+  operationHistoryOpenDiagnostic: 'Open Diagnostic',
+  operationHistoryOpenDiagnosticDir: 'Open Diagnostic Folder',
+  operationHistoryDiagnosticFailed: 'Failed to open diagnostic: {message}',
 
   // WorkLogPanel
   workLogTitle: 'Work Log',

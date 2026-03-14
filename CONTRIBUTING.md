@@ -77,8 +77,8 @@ npx tsc -b --noEmit         # TypeScript 类型检查（不生成文件）
 - `sidebar-layout.test.ts`：验证侧边栏 CSS 支持纵向滚动
 
 当前主工作区验证状态：
-- `npm test` 已通过（9 个测试文件 / 20 个用例）
-- `cargo test --manifest-path src-tauri/Cargo.toml` 已通过（44 个测试）
+- `npm test` 已通过（10 个测试文件 / 21 个用例）
+- `cargo test --manifest-path src-tauri/Cargo.toml` 已通过（46 个测试）
 - `.worktrees/**` 已在 Vitest 配置中排除，不再污染主工作区测试收集
 
 #### Windows ↔ Linux/Docker/WSL 切换注意（重要）
@@ -203,6 +203,7 @@ npm run tauri:build
 - `scanner.rs`（344 行）：仓库扫描核心逻辑——Orphan/Misplaced/Broken 三种检测 + 增量扫描 + Rayon `par_iter()` 并行 MD 解析和缩略图生成 + allImages 收集
 - `parser.rs`（148 行）：Markdown 图片链接提取——代码块预处理（围栏/行内）+ data URI 过滤 + Wiki Link & Markdown 双正则 + normalize_filename
 - `models.rs`：`ScanIssue`、`ScanResult`、`ScanIndex`、`AttachmentInfo`、`DuplicateGroup`、`DuplicateFile`、`MergeSummary`、`ConvertSummary` 数据结构
+- `diagnostic_log.rs`：Misplaced 修复复核诊断输出（voyager-data/diagnostics/*.jsonl）
 - `ops_log.rs`（166 行）：操作历史 JSON 持久化（voyager-data/ops-history.json），支持 fix/migration/backup/rename 四种任务类型
 - `thumb_cache.rs`（185 行）：三级 WebP 缩略图生成与缓存（哈希命名 + 级联缩放）
 - `migrate.rs`（123 行）：笔记 + 附件整体搬家 + 冲突策略
@@ -236,12 +237,12 @@ npm run tauri:build
 
 前端通过 `invoke('command_name', { params })` 调用后端 Rust 函数，返回 JSON 自动反序列化。所有命令定义在 `main.rs` 中。
 
-全部 26 个命令：
+全部 28 个命令：
 
 | 命令 | 功能 |
 |------|------|
 | `scan_vault` | 扫描仓库（Orphan/Misplaced/Broken），返回问题列表 + allImages + scanIndex |
-| `fix_issues` | 执行修复：移动 Misplaced、删除 Orphan、跳过 Broken |
+| `fix_issues` | 执行修复：移动 Misplaced、删除 Orphan、跳过 Broken，并对 Misplaced 做修复后复核 |
 | `rename_image` | 重命名图片文件 + 更新所有引用该文件名的 MD 文件 |
 | `generate_all_thumbnails` | 批量生成问题/扫描图片的三级缩略图（Rayon 并行） |
 | `generate_all_thumbnails_all` | 批量生成附件总览页 `.voyager-gallery-cache-all` 的三级缩略图 |
@@ -252,8 +253,11 @@ npm run tauri:build
 | `fix_broken_with_file` | 拖入图片修复断链：复制文件到 attachments 目录 |
 | `list_operation_history` | 获取操作历史列表 |
 | `execute_migration` | 笔记 + 附件连带迁移 |
+| `preview_flatten_attachments` / `flatten_attachments` | 预览 / 执行子目录 attachments 汇总预处理 |
 | `open_file` / `open_file_parent` | 打开文件 / 在文件管理器中显示 |
+| `open_diagnostics_dir` / `open_misplaced_fix_diagnostic` | 打开诊断目录 / 指定 fix 任务诊断文件 |
 | `clear_thumbnail_cache` | 清除问题/扫描缩略图缓存 |
+| `clear_thumbnail_cache_all` | 清除附件总览页专用缩略图缓存 |
 | `clear_thumbnail_cache_all` | 清除附件总览页专用缩略图缓存 |
 | `get_runtime_logs` | 获取运行日志 |
 | `read_all_local_storage` | 读取本地设置 |
@@ -267,6 +271,7 @@ npm run tauri:build
 
 - **用户设置/缓存**：存储在 exe 同目录的 `voyager-data/` 文件夹，每个 key 一个 `.json` 文件
 - **操作历史**：持久化到 `voyager-data/ops-history.json`，启动时自动加载，重启后不丢失
+- **修复诊断**：Misplaced 修复复核日志会写入 `voyager-data/diagnostics/misplaced-fix.jsonl`，并按 taskId 生成单独诊断文件，方便从 UI 直接打开排查
 - **缩略图缓存**：存储在 exe 同目录的 `.voyager-gallery-cache/`
 
 ### TypeScript 类型定义速查（`src/types.ts`）

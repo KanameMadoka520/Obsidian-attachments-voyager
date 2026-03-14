@@ -89,3 +89,8 @@ export interface RuntimeLogLine {
   level: 'info' | 'warn' | 'error'
   message: string
 }
+
+export interface DiagnosticActionLabels {
+  openFile: string
+  openDir: string
+}
